@@ -14,7 +14,8 @@ class RegionalMapApp {
             loadingMask: document.getElementById('loadingMask'),
             toast: document.getElementById('toast'),
             systemInfo: document.querySelector('#systemInfo .info-content'),
-            borderSystems: document.querySelector('#borderSystems .border-list')
+            searchInput: document.getElementById('searchInput'),
+            searchResults: document.getElementById('searchResults')
         };
         
         this.init();
@@ -64,6 +65,135 @@ class RegionalMapApp {
                 this.renderer.resetView();
             }
         });
+        
+        // 搜索事件绑定
+        this.bindSearchEvents();
+    }
+    
+    bindSearchEvents() {
+        const searchInput = this.elements.searchInput;
+        const searchResults = this.elements.searchResults;
+        
+        let debounceTimer = null;
+        
+        searchInput.addEventListener('input', (e) => {
+            const query = e.target.value.trim();
+            
+            clearTimeout(debounceTimer);
+            
+            if (query.length < 2) {
+                this.hideSearchResults();
+                return;
+            }
+            
+            debounceTimer = setTimeout(() => {
+                this.performSearch(query);
+            }, 200);
+        });
+        
+        // 点击外部关闭搜索结果
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.system-search')) {
+                this.hideSearchResults();
+            }
+        });
+        
+        // 键盘导航
+        searchInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                this.hideSearchResults();
+                searchInput.blur();
+            }
+        });
+    }
+    
+    performSearch(query) {
+        const results = this.searchSystems(query);
+        this.renderSearchResults(results, query);
+    }
+    
+    searchSystems(query) {
+        const results = [];
+        const lowerQuery = query.toLowerCase();
+        
+        for (const system of dataLoader.systems.values()) {
+            const nameMatch = system.name.toLowerCase().includes(lowerQuery);
+            const nameEnMatch = system.nameEn && system.nameEn.toLowerCase().includes(lowerQuery);
+            
+            if (nameMatch || nameEnMatch) {
+                const region = dataLoader.regions.get(system.regionID);
+                results.push({
+                    system: system,
+                    regionName: region ? region.name : '未知星域'
+                });
+            }
+            
+            if (results.length >= 20) break; // 最多显示20个结果
+        }
+        
+        return results;
+    }
+    
+    renderSearchResults(results, query) {
+        const container = this.elements.searchResults;
+        
+        if (results.length === 0) {
+            container.innerHTML = '<div class="search-no-results">未找到匹配的星系</div>';
+            container.classList.add('show');
+            return;
+        }
+        
+        container.innerHTML = '';
+        
+        for (const item of results) {
+            const div = document.createElement('div');
+            div.className = 'search-result-item';
+            
+            const securityClass = item.system.securityClass;
+            const securityText = item.system.securityStatus.toFixed(1);
+            
+            div.innerHTML = `
+                <div class="system-name">
+                    ${this.highlightMatch(item.system.name, query)}
+                    <span class="security-badge ${securityClass}">${securityText}</span>
+                </div>
+                <div class="region-name">${item.regionName}</div>
+            `;
+            
+            div.addEventListener('click', () => {
+                this.selectSystem(item.system);
+                this.hideSearchResults();
+                this.elements.searchInput.value = '';
+            });
+            
+            container.appendChild(div);
+        }
+        
+        container.classList.add('show');
+    }
+    
+    highlightMatch(text, query) {
+        const lowerText = text.toLowerCase();
+        const lowerQuery = query.toLowerCase();
+        const index = lowerText.indexOf(lowerQuery);
+        
+        if (index === -1) return text;
+        
+        const before = text.slice(0, index);
+        const match = text.slice(index, index + query.length);
+        const after = text.slice(index + query.length);
+        
+        return `${before}<mark style="background: rgba(90, 143, 199, 0.4); color: inherit;">${match}</mark>${after}`;
+    }
+    
+    hideSearchResults() {
+        this.elements.searchResults.classList.remove('show');
+    }
+    
+    selectSystem(system) {
+        // 跳转到星系所在星域并居中显示
+        this.selectRegion(system.regionID, system.id, true);
+        this.showToast(`已定位到: ${system.name}`);
     }
     
     populateRegionSelector() {
@@ -82,11 +212,12 @@ class RegionalMapApp {
         }
     }
     
-    selectRegion(regionId, selectSystemId = null) {
+    selectRegion(regionId, selectSystemId = null, centerOnTarget = false) {
         if (this.currentRegionId === regionId && !selectSystemId) return;
         
         this.currentRegionId = regionId;
         this.pendingSelection = selectSystemId;
+        this.pendingCenterOnTarget = centerOnTarget;
         
         this.elements.regionSelect.value = regionId;
         
@@ -96,7 +227,8 @@ class RegionalMapApp {
             return;
         }
         
-        this.renderer.setData(data);
+        // 如果需要居中目标，跳过初始的 fitToBounds
+        this.renderer.setData(data, centerOnTarget);
         
         // 如果有待选中的星系，在渲染后选中它
         if (selectSystemId) {
@@ -105,56 +237,27 @@ class RegionalMapApp {
             if (externalSystem) {
                 this.renderer.setSelectedSystem(externalSystem);
                 this.updateSystemInfo(externalSystem);
+                if (centerOnTarget) {
+                    this.renderer.centerOnSystem(externalSystem);
+                }
             } else {
                 // 在本星域中查找
                 const system = data.systems.find(s => s.id === selectSystemId);
                 if (system) {
                     this.renderer.setSelectedSystem(system);
                     this.updateSystemInfo(system);
+                    if (centerOnTarget) {
+                        this.renderer.centerOnSystem(system);
+                    }
                 }
             }
             this.pendingSelection = null;
+            this.pendingCenterOnTarget = false;
         } else {
-            this.updateSidePanel(data);
             this.updateSystemInfo(null);
         }
         
         this.showToast(`已切换到: ${data.region.name}`);
-    }
-    
-    updateSidePanel(data) {
-        const borderList = this.elements.borderSystems;
-        
-        if (data.borderSystems.length === 0) {
-            borderList.innerHTML = '<p class="placeholder">此星域没有直接连接的相邻星域</p>';
-        } else {
-            borderList.innerHTML = '';
-            
-            for (const system of data.borderSystems) {
-                const item = document.createElement('div');
-                item.className = 'border-item';
-                
-                const connections = system.borderConnections || [];
-                const targetNames = [...new Set(connections.map(c => c.regionName))].join(', ');
-                
-                item.innerHTML = `
-                    <div>
-                        <div class="border-system-name">${system.name}</div>
-                        <div class="border-target-region">→ ${targetNames}</div>
-                    </div>
-                    <span class="border-security ${system.securityClass}">
-                        ${system.securityStatus.toFixed(1)}
-                    </span>
-                `;
-                
-                item.addEventListener('click', () => {
-                    this.renderer.setSelectedSystem(system);
-                    this.updateSystemInfo(system);
-                });
-                
-                borderList.appendChild(item);
-            }
-        }
     }
     
     onSystemHover(system) {

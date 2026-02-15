@@ -31,6 +31,12 @@
                 </select>
             </div>
 
+            <!-- 星系搜索 -->
+            <div class="system-search">
+                <input type="text" id="searchInput" placeholder="搜索星系..." autocomplete="off">
+                <div id="searchResults" class="search-results"></div>
+            </div>
+
             <!-- 图例 -->
             <div class="legend">
                 <div class="legend-item">
@@ -78,14 +84,6 @@
                     </div>
                 </div>
 
-                <!-- 相邻星域 -->
-                <div class="panel-section" id="borderSystems">
-                    <h3>相邻星域入口</h3>
-                    <div class="border-list">
-                        <p class="placeholder">选择星域后显示</p>
-                    </div>
-                </div>
-
                 <!-- 控制说明 -->
                 <div class="panel-section controls-help">
                     <h3>操作说明</h3>
@@ -102,9 +100,9 @@
 
     <!-- 使用 js-yaml 库解析 YAML -->
     <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
-    <script src="js/dataLoader.js"></script>
-    <script src="js/mapRenderer.js"></script>
-    <script src="js/interaction.js"></script>
-    <script src="js/main.js"></script>
+    <script src="js/dataLoader.js?v=5"></script>
+    <script src="js/mapRenderer.js?v=5"></script>
+    <script src="js/interaction.js?v=5"></script>
+    <script src="js/main.js?v=5"></script>
 </body>
 </html>

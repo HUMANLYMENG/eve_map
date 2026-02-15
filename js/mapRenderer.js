@@ -77,6 +77,8 @@ class MapRenderer {
         this.canvas.style.width = rect.width + 'px';
         this.canvas.style.height = rect.height + 'px';
         
+        // 重置变换矩阵后再缩放，避免重复缩放
+        this.ctx.setTransform(1, 0, 0, 1, 0, 0);
         this.ctx.scale(dpr, dpr);
         
         this.viewport.width = rect.width;
@@ -87,12 +89,12 @@ class MapRenderer {
         }
     }
     
-    setData(data) {
+    setData(data, skipFit = false) {
         this.currentData = data;
         this.hoveredSystem = null;
         this.selectedSystem = null;
         
-        if (data && data.bounds) {
+        if (data && data.bounds && !skipFit) {
             this.fitToBounds(data.bounds);
         }
         
@@ -399,12 +401,13 @@ class MapRenderer {
     getSystemAt(screenPos) {
         if (!this.currentData) return null;
         
-        const hitRadius = 12;
-        const worldPos = this.screenToWorld(screenPos);
+        const hitRadius = 25; // 屏幕像素，更大的命中区域
         
+        // 使用屏幕坐标进行比较，避免坐标转换误差
         for (const system of this.currentData.systems) {
-            const dx = system.position2D.x - worldPos.x;
-            const dy = system.position2D.y - worldPos.y;
+            const systemScreenPos = this.worldToScreen(system.position2D);
+            const dx = systemScreenPos.x - screenPos.x;
+            const dy = systemScreenPos.y - screenPos.y;
             const dist = Math.sqrt(dx * dx + dy * dy);
             
             if (dist < hitRadius) {
@@ -414,8 +417,9 @@ class MapRenderer {
         
         if (this.currentData.externalSystems) {
             for (const system of this.currentData.externalSystems) {
-                const dx = system.position2D.x - worldPos.x;
-                const dy = system.position2D.y - worldPos.y;
+                const systemScreenPos = this.worldToScreen(system.position2D);
+                const dx = systemScreenPos.x - screenPos.x;
+                const dy = systemScreenPos.y - screenPos.y;
                 const dist = Math.sqrt(dx * dx + dy * dy);
                 
                 if (dist < hitRadius) {
@@ -451,5 +455,21 @@ class MapRenderer {
             this.fitToBounds(this.currentData.bounds);
             this.render();
         }
+    }
+    
+    centerOnSystem(system, zoomLevel = 3) {
+        if (!system) return;
+        
+        // 设置目标缩放级别
+        this.viewport.zoom = zoomLevel;
+        
+        // 计算目标位置，使星系居中
+        const targetX = system.position2D.x * this.viewport.zoom;
+        const targetY = system.position2D.y * this.viewport.zoom;
+        
+        this.viewport.x = this.viewport.width / 2 - targetX;
+        this.viewport.y = this.viewport.height / 2 - targetY;
+        
+        this.render();
     }
 }
