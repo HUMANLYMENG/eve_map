@@ -1,0 +1,390 @@
+/* ==================== 基础样式 - Eveeye 风格 ==================== */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+:root {
+    --bg-primary: #0a0808;
+    --bg-secondary: #121010;
+    --bg-panel: #181515;
+    --border-color: #2a2525;
+    --text-primary: #e8e0e0;
+    --text-secondary: #888080;
+    --accent-blue: #5a8fc7;
+    --accent-orange: #c78f4a;
+    --accent-red: #c75a5a;
+    --accent-green: #5ac75a;
+    --glow-blue: rgba(90, 143, 199, 0.2);
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans SC', sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    overflow: hidden;
+    height: 100vh;
+}
+
+#app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+}
+
+/* ==================== 头部样式 ==================== */
+.header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 20px;
+    height: 52px;
+    background: linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg-primary) 100%);
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+
+.header-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.logo {
+    width: 32px;
+    height: 32px;
+    background: linear-gradient(135deg, #1a3a5c 0%, #0d1f33 100%);
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(90, 143, 199, 0.3);
+    box-shadow: 0 0 8px var(--glow-blue);
+}
+
+.logo svg {
+    width: 20px;
+    height: 20px;
+    color: var(--accent-blue);
+}
+
+.title-group h1 {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+    letter-spacing: 0.3px;
+}
+
+.title-group .subtitle {
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+
+/* ==================== 星域选择器 ==================== */
+.region-selector select {
+    width: 220px;
+    padding: 7px 12px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--text-primary);
+    font-size: 13px;
+    cursor: pointer;
+    outline: none;
+    transition: all 0.2s;
+}
+
+.region-selector select:hover {
+    border-color: var(--accent-blue);
+}
+
+.region-selector select:focus {
+    border-color: var(--accent-blue);
+    box-shadow: 0 0 0 2px var(--glow-blue);
+}
+
+.region-selector option {
+    background: var(--bg-panel);
+    padding: 8px;
+}
+
+/* ==================== 图例 ==================== */
+.legend {
+    display: flex;
+    gap: 20px;
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 2px;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.dot.high-sec { 
+    background: rgba(90, 143, 199, 0.3); 
+    border-color: rgba(255, 255, 255, 0.5);
+}
+.dot.low-sec { 
+    background: rgba(199, 143, 74, 0.3); 
+    border-color: rgba(255, 255, 255, 0.5);
+}
+.dot.null-sec { 
+    background: rgba(199, 90, 90, 0.3); 
+    border-color: rgba(255, 255, 255, 0.5);
+}
+.dot.border { 
+    background: rgba(90, 199, 90, 0.2);
+    border-color: rgba(100, 200, 100, 0.6);
+    box-shadow: 0 0 6px rgba(100, 200, 100, 0.3);
+}
+
+/* ==================== 主内容区 ==================== */
+.main-content {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+}
+
+/* ==================== 地图容器 ==================== */
+.map-container {
+    flex: 1;
+    position: relative;
+    background: var(--bg-primary);
+    overflow: hidden;
+    cursor: grab;
+}
+
+.map-container:active {
+    cursor: grabbing;
+}
+
+#mapCanvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+/* ==================== 加载遮罩 ==================== */
+.loading-mask {
+    position: absolute;
+    inset: 0;
+    background: rgba(10, 8, 8, 0.95);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    transition: opacity 0.3s;
+}
+
+.loading-mask.hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.spinner {
+    width: 36px;
+    height: 36px;
+    border: 2px solid var(--border-color);
+    border-top-color: var(--accent-blue);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+.loading-mask p {
+    margin-top: 14px;
+    color: var(--text-secondary);
+    font-size: 13px;
+}
+
+/* ==================== Toast 提示 ==================== */
+.toast {
+    position: absolute;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%) translateY(100px);
+    padding: 10px 20px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    font-size: 13px;
+    color: var(--text-primary);
+    opacity: 0;
+    transition: all 0.3s;
+    z-index: 50;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.toast.show {
+    transform: translateX(-50%) translateY(0);
+    opacity: 1;
+}
+
+/* ==================== 侧面板 ==================== */
+.side-panel {
+    width: 260px;
+    background: var(--bg-secondary);
+    border-left: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+}
+
+.panel-section {
+    padding: 16px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.panel-section h3 {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    margin-bottom: 12px;
+}
+
+.info-content {
+    font-size: 12px;
+}
+
+.info-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 5px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.info-row:last-child {
+    border-bottom: none;
+}
+
+.info-label {
+    color: var(--text-secondary);
+}
+
+.info-value {
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+.info-value.high { color: var(--accent-blue); }
+.info-value.low { color: var(--accent-orange); }
+.info-value.null { color: var(--accent-red); }
+
+.placeholder {
+    color: var(--text-secondary);
+    font-size: 12px;
+    text-align: center;
+    padding: 16px 0;
+    font-style: italic;
+}
+
+/* ==================== 相邻星域列表 ==================== */
+.border-list {
+    max-height: 220px;
+    overflow-y: auto;
+}
+
+.border-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 10px;
+    margin-bottom: 6px;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 4px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.border-item:hover {
+    border-color: var(--accent-blue);
+    background: rgba(90, 143, 199, 0.08);
+}
+
+.border-system-name {
+    font-size: 12px;
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+.border-target-region {
+    font-size: 10px;
+    color: var(--accent-green);
+    margin-top: 2px;
+}
+
+.border-security {
+    font-size: 11px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-weight: 600;
+    font-family: 'SF Mono', monospace;
+}
+
+.border-security.high { 
+    background: rgba(90, 143, 199, 0.15); 
+    color: var(--accent-blue); 
+}
+.border-security.low { 
+    background: rgba(199, 143, 74, 0.15); 
+    color: var(--accent-orange); 
+}
+.border-security.null { 
+    background: rgba(199, 90, 90, 0.15); 
+    color: var(--accent-red); 
+}
+
+/* ==================== 控制说明 ==================== */
+.controls-help ul {
+    list-style: none;
+    font-size: 11px;
+    color: var(--text-secondary);
+    line-height: 1.8;
+}
+
+/* ==================== 响应式 ==================== */
+@media (max-width: 900px) {
+    .side-panel {
+        display: none;
+    }
+    
+    .legend {
+        display: none;
+    }
+}
+
+/* ==================== 滚动条样式 ==================== */
+::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--bg-primary);
+}
+
+::-webkit-scrollbar-thumb {
+    background: #3a3535;
+    border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #4a4545;
+}

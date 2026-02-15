@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EVE Regional Map - Eveeye Style</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div id="app">
+        <!-- 顶部标题栏 -->
+        <header class="header">
+            <div class="header-left">
+                <div class="logo">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"/>
+                        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+                        <path d="M2 12h20"/>
+                    </svg>
+                </div>
+                <div class="title-group">
+                    <h1>EVE Regional Map</h1>
+                    <span class="subtitle">星域导航</span>
+                </div>
+            </div>
+            
+            <!-- 星域选择器 -->
+            <div class="region-selector">
+                <select id="regionSelect">
+                    <option value="">选择星域...</option>
+                </select>
+            </div>
+
+            <!-- 图例 -->
+            <div class="legend">
+                <div class="legend-item">
+                    <span class="dot high-sec"></span>
+                    <span>高安 (≥0.5)</span>
+                </div>
+                <div class="legend-item">
+                    <span class="dot low-sec"></span>
+                    <span>低安 (0.1-0.4)</span>
+                </div>
+                <div class="legend-item">
+                    <span class="dot null-sec"></span>
+                    <span>00区 (<0.1)</span>
+                </div>
+                <div class="legend-item">
+                    <span class="dot border"></span>
+                    <span>入口星系</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- 主内容区 -->
+        <main class="main-content">
+            <!-- 地图容器 -->
+            <div id="mapContainer" class="map-container">
+                <canvas id="mapCanvas"></canvas>
+                
+                <!-- 加载遮罩 -->
+                <div id="loadingMask" class="loading-mask">
+                    <div class="spinner"></div>
+                    <p>加载星图数据...</p>
+                </div>
+
+                <!-- 提示信息 -->
+                <div id="toast" class="toast"></div>
+            </div>
+
+            <!-- 右侧面板 -->
+            <aside class="side-panel">
+                <!-- 星系信息 -->
+                <div class="panel-section" id="systemInfo">
+                    <h3>星系信息</h3>
+                    <div class="info-content">
+                        <p class="placeholder">悬停或点击星系查看详情</p>
+                    </div>
+                </div>
+
+                <!-- 相邻星域 -->
+                <div class="panel-section" id="borderSystems">
+                    <h3>相邻星域入口</h3>
+                    <div class="border-list">
+                        <p class="placeholder">选择星域后显示</p>
+                    </div>
+                </div>
+
+                <!-- 控制说明 -->
+                <div class="panel-section controls-help">
+                    <h3>操作说明</h3>
+                    <ul>
+                        <li>🖱️ 左键拖动 - 平移地图</li>
+                        <li>🔍 滚轮 - 缩放</li>
+                        <li>👆 单击 - 选中星系</li>
+                        <li>🏠 双击 - 重置视图</li>
+                    </ul>
+                </div>
+            </aside>
+        </main>
+    </div>
+
+    <!-- 使用 js-yaml 库解析 YAML -->
+    <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
+    <script src="js/dataLoader.js"></script>
+    <script src="js/mapRenderer.js"></script>
+    <script src="js/interaction.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html>
