@@ -2,12 +2,146 @@
  * 主程序 - 应用程序入口
  */
 
+// 虫洞记录
+// 虫洞类型列表
+const WORMHOLE_TYPES = [
+    'A009', 'A239', 'A641', 'A982', 'B041', 'B274', 'B449', 'B520', 'B735',
+    'C008', 'C125', 'C140', 'C247', 'C248', 'C391', 'C414', 'C729', 'D364',
+    'D382', 'D792', 'D845', 'E004', 'E175', 'E545', 'E587', 'F135', 'F216',
+    'F355', 'G008', 'G024', 'H121', 'H296', 'H900', 'I182', 'J244', 'J377',
+    'J492', 'K162', 'K329', 'K346', 'L005', 'L031', 'L477', 'L614', 'M001',
+    'M164', 'M267', 'M555', 'M609', 'N062', 'N110', 'N290', 'N432', 'N766',
+    'N770', 'N944', 'N968', 'O128', 'O477', 'O883', 'P060', 'Q003', 'Q063',
+    'Q317', 'R051', 'R081', 'R259', 'R474', 'R943', 'S047', 'S199', 'S804',
+    'S877', 'T405', 'T458', 'U210', 'U319', 'U372', 'U574', 'V283', 'V301',
+    'V753', 'V898', 'V911', 'V928', 'W237', 'X450', 'X702', 'X877', 'Y683',
+    'Y790', 'Z006', 'Z060', 'Z142', 'Z457', 'Z647', 'Z971'
+];
+
+class WormholeRecord {
+    constructor(data) {
+        this.id = Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+        this.fromSystem = data.fromSystem;
+        this.toSystem = data.toSystem;
+        this.fromSignal = data.fromSignal;
+        this.toSignal = data.toSignal;
+        this.type = data.type;
+        this.size = data.size;
+        this.maxLife = data.maxLife;
+        this.recordTime = Date.now();
+        // 计算过期时间
+        const lifeHours = { '1h': 1, '4h': 4, '1d': 24, '2d': 48 };
+        this.expiresAt = this.recordTime + (lifeHours[data.maxLife] || 24) * 60 * 60 * 1000;
+    }
+    
+    getRemainingTime() {
+        const now = Date.now();
+        const diff = this.expiresAt - now;
+        
+        if (diff <= 0) return '已过期';
+        
+        const hours = Math.floor(diff / (60 * 60 * 1000));
+        const minutes = Math.floor((diff % (60 * 60 * 1000)) / (60 * 1000));
+        
+        if (hours >= 24) {
+            return `${Math.floor(hours / 24)}天 ${hours % 24}小时`;
+        } else if (hours > 0) {
+            return `${hours}小时 ${minutes}分钟`;
+        } else {
+            return `${minutes}分钟`;
+        }
+    }
+    
+    getFormattedRecordTime() {
+        const date = new Date(this.recordTime);
+        return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
+    }
+    
+    getBookmarks() {
+        const bookmarks = [];
+        if (this.fromSignal && this.fromSignal !== '未知') {
+            bookmarks.push({
+                text: `${this.fromSignal} -> ${this.toSystem}`,
+                copyText: `${this.fromSignal} -> ${this.toSystem}`
+            });
+        }
+        if (this.toSignal && this.toSignal !== '未知') {
+            bookmarks.push({
+                text: `${this.toSignal} -> ${this.fromSystem}`,
+                copyText: `${this.toSignal} -> ${this.fromSystem}`
+            });
+        }
+        return bookmarks;
+    }
+    
+    getKey() {
+        return `${this.fromSystem}-${this.toSystem}-${this.type}`;
+    }
+}
+
+// 路径记录器 - 记录点击历史
+class PathRecorder {
+    constructor(maxDisplay = 6) {
+        this.clickHistory = []; // 所有点击历史
+        this.maxDisplay = maxDisplay; // 最大显示数量
+    }
+    
+    addSystem(system) {
+        if (!system) return;
+        
+        // 避免连续重复添加同一个星系
+        const last = this.clickHistory[this.clickHistory.length - 1];
+        if (last && last.id === system.id) return;
+        
+        this.clickHistory.push({
+            id: system.id,
+            name: system.name,
+            regionID: system.regionID,
+            timestamp: Date.now()
+        });
+    }
+    
+    getDisplayPath() {
+        // 返回最近 maxDisplay 个星系
+        if (this.clickHistory.length <= this.maxDisplay) {
+            return [...this.clickHistory];
+        }
+        return this.clickHistory.slice(-this.maxDisplay);
+    }
+    
+    getDisplayConnections() {
+        const path = this.getDisplayPath();
+        const connections = [];
+        
+        for (let i = 0; i < path.length - 1; i++) {
+            connections.push({
+                from: path[i],
+                to: path[i + 1]
+            });
+        }
+        
+        return connections;
+    }
+    
+    clear() {
+        this.clickHistory = [];
+    }
+    
+    hasPath() {
+        return this.clickHistory.length >= 2;
+    }
+}
+
 class RegionalMapApp {
     constructor() {
         this.renderer = null;
         this.interaction = null;
         this.currentRegionId = null;
-        this.pendingSelection = null; // 切换星域后要选中的星系
+        this.pendingSelection = null;
+        this.pathRecorder = new PathRecorder(6); // 路径记录器
+        this.wormholeRecords = []; // 虫洞记录
+        this.detectedWormholes = new Set(); // 已检测到的虫洞，避免重复提示
+        this.wormholeTimer = null; // 倒计时定时器
         
         this.elements = {
             regionSelect: document.getElementById('regionSelect'),
@@ -15,7 +149,10 @@ class RegionalMapApp {
             toast: document.getElementById('toast'),
             systemInfo: document.querySelector('#systemInfo .info-content'),
             searchInput: document.getElementById('searchInput'),
-            searchResults: document.getElementById('searchResults')
+            searchResults: document.getElementById('searchResults'),
+            pathList: document.querySelector('#pathPanel .path-list'),
+            pathPanel: document.getElementById('pathPanel'),
+            wormholeTable: document.querySelector('#wormholePanel .wormhole-table')
         };
         
         this.init();
@@ -273,17 +410,334 @@ class RegionalMapApp {
             return;
         }
         
-        // 如果点击的是外部星系，跳转到该星域并选中该星系
+        // 记录到路径
+        this.pathRecorder.addSystem(system);
+        this.updatePathPanel();
+        this.renderer.setPathData(this.pathRecorder.getDisplayPath(), this.pathRecorder.getDisplayConnections());
+        
+        // 检测新形成的虫洞连接
+        this.detectWormholes();
+        
+        // 如果点击的是外部星系，跳转到该星域并选中该星系（居中显示）
         if (system.isExternal) {
             const targetRegionId = system.regionID;
             const targetSystemId = system.id;
             
             this.showToast(`正在跳转到 ${system.name}...`);
-            this.selectRegion(targetRegionId, targetSystemId);
+            this.selectRegion(targetRegionId, targetSystemId, true);
             return;
         }
         
         this.updateSystemInfo(system);
+    }
+    
+    detectWormholes() {
+        const connections = this.pathRecorder.getDisplayConnections();
+        const allSystems = this.pathRecorder.getDisplayPath();
+        
+        for (const conn of connections) {
+            const key = `${conn.from.id}-${conn.to.id}`;
+            const reverseKey = `${conn.to.id}-${conn.from.id}`;
+            
+            if (this.detectedWormholes.has(key) || this.detectedWormholes.has(reverseKey)) {
+                continue; // 已检测过
+            }
+            
+            // 检查是否是虫洞连接（无星门连接）
+            const hasStargate = dataLoader.connections.get(conn.from.id)?.includes(conn.to.id);
+            
+            if (!hasStargate) {
+                // 发现新虫洞
+                this.detectedWormholes.add(key);
+                this.showWormholeDialog(conn.from, conn.to);
+            }
+        }
+    }
+    
+    showWormholeDialog(fromSystem, toSystem) {
+        // 创建对话框
+        const dialog = document.createElement('div');
+        dialog.className = 'wormhole-dialog';
+        dialog.innerHTML = `
+            <div class="wormhole-dialog-content">
+                <h3>发现虫洞连接</h3>
+                <p>${fromSystem.name} ↔ ${toSystem.name}</p>
+                <div class="wormhole-form">
+                    <div class="form-row">
+                        <label>虫洞类型:</label>
+                        <div class="wh-type-search">
+                            <input type="text" id="wh-type-input" value="K162" placeholder="输入类型搜索..." autocomplete="off">
+                            <div class="wh-type-dropdown" style="display:none;"></div>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <label>${fromSystem.name} 信号:</label>
+                        <input type="text" id="wh-from-signal" placeholder="ABC-123" maxlength="10">
+                    </div>
+                    <div class="form-row">
+                        <label>${toSystem.name} 信号:</label>
+                        <input type="text" id="wh-to-signal" placeholder="XYZ-789" maxlength="10">
+                    </div>
+                    <div class="form-row">
+                        <label>虫洞大小:</label>
+                        <select id="wh-size">
+                            <option value="S">S (护卫舰)</option>
+                            <option value="M">M (巡洋舰)</option>
+                            <option value="L">L (战列舰)</option>
+                            <option value="XL">XL (旗舰)</option>
+                        </select>
+                    </div>
+                    <div class="form-row">
+                        <label>最大寿命:</label>
+                        <select id="wh-life">
+                            <option value="1h">1小时</option>
+                            <option value="4h">4小时</option>
+                            <option value="1d" selected>1天</option>
+                            <option value="2d">2天</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="wormhole-dialog-buttons">
+                    <button class="btn-cancel">取消</button>
+                    <button class="btn-save">记录虫洞</button>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(dialog);
+        
+        // 类型搜索功能
+        const typeInput = dialog.querySelector('#wh-type-input');
+        const typeDropdown = dialog.querySelector('.wh-type-dropdown');
+        
+        const filterTypes = (query) => {
+            const filtered = WORMHOLE_TYPES.filter(t => 
+                t.toLowerCase().includes(query.toLowerCase())
+            );
+            return filtered.slice(0, 10); // 最多显示10个
+        };
+        
+        const showDropdown = () => {
+            const filtered = filterTypes(typeInput.value);
+            typeDropdown.innerHTML = filtered.map(t => 
+                `<div class="wh-type-option" data-value="${t}">${t}</div>`
+            ).join('');
+            typeDropdown.style.display = filtered.length > 0 ? 'block' : 'none';
+            
+            // 绑定选项点击
+            typeDropdown.querySelectorAll('.wh-type-option').forEach(opt => {
+                opt.addEventListener('click', () => {
+                    typeInput.value = opt.dataset.value;
+                    typeDropdown.style.display = 'none';
+                });
+            });
+        };
+        
+        typeInput.addEventListener('input', showDropdown);
+        typeInput.addEventListener('focus', showDropdown);
+        
+        // 点击外部关闭下拉
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.wh-type-search')) {
+                typeDropdown.style.display = 'none';
+            }
+        });
+        
+        // 绑定按钮事件
+        dialog.querySelector('.btn-cancel').addEventListener('click', () => {
+            dialog.remove();
+        });
+        
+        dialog.querySelector('.btn-save').addEventListener('click', () => {
+            const type = typeInput.value.toUpperCase();
+            // 验证类型
+            if (!WORMHOLE_TYPES.includes(type)) {
+                this.showToast('请输入有效的虫洞类型', 'error');
+                return;
+            }
+            
+            const fromSignal = dialog.querySelector('#wh-from-signal').value || '未知';
+            const toSignal = dialog.querySelector('#wh-to-signal').value || '未知';
+            const size = dialog.querySelector('#wh-size').value;
+            const maxLife = dialog.querySelector('#wh-life').value;
+            
+            const record = new WormholeRecord({
+                fromSystem: fromSystem.name,
+                toSystem: toSystem.name,
+                fromSignal,
+                toSignal,
+                type,
+                size,
+                maxLife
+            });
+            
+            this.wormholeRecords.push(record);
+            this.updateWormholeTable();
+            this.startWormholeTimer();
+            dialog.remove();
+            this.showToast('虫洞已记录');
+        });
+    }
+    
+    updateWormholeTable() {
+        const container = this.elements.wormholeTable;
+        if (!container) return;
+        
+        if (this.wormholeRecords.length === 0) {
+            container.innerHTML = '<p class="placeholder">暂无虫洞记录</p>';
+            return;
+        }
+        
+        let html = `
+            <table class="wormhole-data-table">
+                <thead>
+                    <tr>
+                        <th>起点↔终点</th>
+                        <th>类型</th>
+                        <th>大小</th>
+                        <th>记录时间</th>
+                        <th>剩余</th>
+                        <th>书签名</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+        `;
+        
+        this.wormholeRecords.forEach((record, index) => {
+            const remaining = record.getRemainingTime();
+            const expired = remaining === '已过期';
+            const recordTime = record.getFormattedRecordTime();
+            const bookmarks = record.getBookmarks();
+            
+            let bookmarksHtml = '';
+            if (bookmarks.length > 0) {
+                bookmarksHtml = bookmarks.map((bm, i) => 
+                    `<span class="bookmark-tag" data-copy="${bm.copyText}" title="点击复制">${bm.text}</span>`
+                ).join('<br>');
+            } else {
+                bookmarksHtml = '<span class="bookmark-tag-empty">无信号</span>';
+            }
+            
+            html += `
+                <tr class="${expired ? 'expired' : ''}">
+                    <td>${record.fromSystem}↔${record.toSystem}</td>
+                    <td>${record.type}</td>
+                    <td>${record.size}</td>
+                    <td>${recordTime}</td>
+                    <td class="remaining-time">${remaining}</td>
+                    <td class="bookmarks-cell">${bookmarksHtml}</td>
+                    <td><button class="btn-delete-wh" data-index="${index}">删除</button></td>
+                </tr>
+            `;
+        });
+        
+        html += '</tbody></table>';
+        container.innerHTML = html;
+        
+        // 绑定书签名点击复制
+        container.querySelectorAll('.bookmark-tag').forEach(tag => {
+            tag.addEventListener('click', async () => {
+                const text = tag.dataset.copy;
+                try {
+                    await navigator.clipboard.writeText(text);
+                    this.showToast('已复制: ' + text);
+                } catch (err) {
+                    // 降级方案
+                    const textarea = document.createElement('textarea');
+                    textarea.value = text;
+                    document.body.appendChild(textarea);
+                    textarea.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(textarea);
+                    this.showToast('已复制: ' + text);
+                }
+            });
+        });
+        
+        // 绑定删除按钮
+        container.querySelectorAll('.btn-delete-wh').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const index = parseInt(e.target.dataset.index);
+                this.wormholeRecords.splice(index, 1);
+                this.updateWormholeTable();
+            });
+        });
+    }
+    
+    startWormholeTimer() {
+        if (this.wormholeTimer) return;
+        
+        this.wormholeTimer = setInterval(() => {
+            this.updateWormholeTable();
+        }, 60000); // 每分钟更新一次
+    }
+    
+    updatePathPanel() {
+        const container = this.elements.pathList;
+        const path = this.pathRecorder.clickHistory;
+        const displayPath = this.pathRecorder.getDisplayPath();
+        
+        if (path.length === 0) {
+            container.innerHTML = '<p class="placeholder">点击星系记录路径</p>';
+            return;
+        }
+        
+        let html = '';
+        path.forEach((item, index) => {
+            const isInDisplay = index >= path.length - this.pathRecorder.maxDisplay;
+            const displayClass = isInDisplay ? 'path-item-display' : 'path-item-history';
+            const number = index + 1;
+            
+            html += `
+                <div class="path-item ${displayClass}" data-system-id="${item.id}" data-region-id="${item.regionID}">
+                    <span class="path-number">${number}</span>
+                    <span class="path-name">${item.name}</span>
+                </div>
+            `;
+        });
+        
+        container.innerHTML = html;
+        
+        // 绑定点击事件 - 聚焦到星系
+        container.querySelectorAll('.path-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const systemId = parseInt(item.dataset.systemId);
+                const regionId = parseInt(item.dataset.regionId);
+                this.focusOnSystem(regionId, systemId);
+            });
+        });
+        
+        // 滚动到最新
+        if (container.lastElementChild) {
+            container.lastElementChild.scrollIntoView({ behavior: 'smooth' });
+        }
+    }
+    
+    focusOnSystem(regionId, systemId) {
+        // 如果不在当前星域，先切换星域
+        if (this.currentRegionId !== regionId) {
+            this.selectRegion(regionId, systemId, true);
+        } else {
+            // 在当前星域，直接居中
+            const data = dataLoader.getRegionData(regionId);
+            if (data) {
+                const system = data.systems.find(s => s.id === systemId) || 
+                              data.externalSystems.find(s => s.id === systemId);
+                if (system) {
+                    this.renderer.setSelectedSystem(system);
+                    this.renderer.centerOnSystem(system);
+                    this.updateSystemInfo(system);
+                }
+            }
+        }
+    }
+    
+    clearPath() {
+        this.pathRecorder.clear();
+        this.updatePathPanel();
+        this.renderer.setPathData([], []);
+        this.showToast('路径已清除');
     }
     
     updateSystemInfo(system) {

@@ -18,6 +18,8 @@ class MapRenderer {
         this.currentData = null;
         this.hoveredSystem = null;
         this.selectedSystem = null;
+        this.pathSystems = [];
+        this.pathConnections = [];
         
         // 样式配置（固定像素大小，不随缩放变化）
         this.styles = {
@@ -34,11 +36,11 @@ class MapRenderer {
                 }
             },
             externalNode: {
-                size: 10,
+                size: 12,
                 radius: 2,
                 borderWidth: 1.5,
-                fillAlpha: 0.1,
-                borderColor: 'rgba(150, 150, 150, 0.5)',
+                fillAlpha: 0.15,
+                borderColor: 'rgba(150, 150, 150, 0.6)',
                 dash: [3, 3]
             },
             border: {
@@ -52,9 +54,9 @@ class MapRenderer {
                     width: 1.2
                 },
                 external: {
-                    color: 'rgba(255, 255, 255, 0.2)',
-                    width: 1,
-                    dash: [5, 5]
+                    color: 'rgba(255, 255, 255, 0.35)',
+                    width: 1.2,
+                    dash: [3, 3]
                 }
             },
             label: {
@@ -110,7 +112,7 @@ class MapRenderer {
         const scaleY = availableHeight / bounds.height;
         
         // 默认缩放更大（更靠近地图）
-        this.viewport.zoom = Math.min(scaleX, scaleY, 10) * 2.5;  // 乘以2.5让默认更近很多
+        this.viewport.zoom = 15;  // 固定默认缩放为15
         
         this.viewport.x = this.viewport.width / 2 - bounds.centerX * this.viewport.zoom;
         this.viewport.y = this.viewport.height / 2 - bounds.centerY * this.viewport.zoom;
@@ -141,7 +143,286 @@ class MapRenderer {
         this.drawConnections();
         this.drawExternalSystems();
         this.drawSystems();
+        this.drawPath(); // 绘制路径
         this.drawLabels();
+    }
+    
+    setPathData(pathSystems, pathConnections) {
+        this.pathSystems = pathSystems || [];
+        this.pathConnections = pathConnections || [];
+        this.render();
+    }
+    
+    drawPath() {
+        if (!this.pathConnections || this.pathConnections.length === 0) return;
+        
+        const { ctx } = this;
+        
+        // 获取当前显示的所有星系
+        const allSystems = new Map();
+        if (this.currentData) {
+            for (const s of this.currentData.systems) allSystems.set(s.id, s);
+            for (const s of this.currentData.externalSystems || []) allSystems.set(s.id, s);
+        }
+        
+        // 计算不在当前星域的路径星系的虚拟位置
+        const externalPathPositions = new Map(); // id -> {x, y}
+        
+        // 找到所有连接到当前星域的路径星系
+        // 即：路径中的星系在当前星域，且路径中有不在当前星域的相邻星系
+        const connectedToBorder = new Map(); // borderSystemId -> [externalSystemIds]
+        
+        for (const conn of this.pathConnections) {
+            const fromInCurrent = allSystems.has(conn.from.id);
+            const toInCurrent = allSystems.has(conn.to.id);
+            
+            if (fromInCurrent && !toInCurrent) {
+                // from 在当前星域，to 在外部
+                const list = connectedToBorder.get(conn.from.id) || [];
+                if (!list.includes(conn.to.id)) list.push(conn.to.id);
+                connectedToBorder.set(conn.from.id, list);
+            } else if (!fromInCurrent && toInCurrent) {
+                // from 在外部，to 在当前星域
+                const list = connectedToBorder.get(conn.to.id) || [];
+                if (!list.includes(conn.from.id)) list.push(conn.from.id);
+                connectedToBorder.set(conn.to.id, list);
+            }
+        }
+        
+        // 为每个连接到边界的外部路径星系链分配位置
+        const processedExternal = new Set();
+        
+        for (const [borderId, externalIds] of connectedToBorder) {
+            const borderSystem = allSystems.get(borderId);
+            if (!borderSystem) continue;
+            
+            const baseAngle = this.calculateExternalAngle(borderSystem);
+            const count = externalIds.length;
+            
+            externalIds.forEach((externalId, index) => {
+                // 计算角度 - 围绕边界星系均匀分布
+                let angle;
+                if (count === 1) {
+                    angle = baseAngle;
+                } else {
+                    const spread = (count - 1) * 0.7; // 约40度间隔
+                    angle = baseAngle - spread / 2 + index * 0.7;
+                }
+                
+                externalPathPositions.set(externalId, {
+                    x: borderSystem.position2D.x + Math.cos(angle) * 12,
+                    y: borderSystem.position2D.y + Math.sin(angle) * 12
+                });
+                processedExternal.add(externalId);
+                
+                // 继续查找这个外部星系的相邻路径星系（形成链）
+                this.processExternalChain(externalId, externalPathPositions, processedExternal, 
+                    borderSystem.position2D, angle, allSystems);
+            });
+        }
+        
+        // 获取路径上所有星系的位置信息
+        const pathSystemPositions = new Map();
+        for (const pathSys of this.pathSystems) {
+            if (allSystems.has(pathSys.id)) {
+                // 在当前星域
+                pathSystemPositions.set(pathSys.id, allSystems.get(pathSys.id).position2D);
+            } else if (externalPathPositions.has(pathSys.id)) {
+                // 使用虚拟位置
+                pathSystemPositions.set(pathSys.id, externalPathPositions.get(pathSys.id));
+            } else {
+                // 从 dataLoader 获取并使用原始位置（备用）
+                const fullSystem = dataLoader.systems.get(pathSys.id);
+                if (fullSystem) {
+                    pathSystemPositions.set(pathSys.id, fullSystem.position2D);
+                }
+            }
+        }
+        
+        // 绘制不在当前星域的路径星系（小图标）
+        for (const [id, pos2D] of pathSystemPositions) {
+            if (!allSystems.has(id)) {
+                const pos = this.worldToScreen(pos2D);
+                const system = dataLoader.systems.get(id);
+                
+                // 背景清除
+                ctx.fillStyle = '#0a0808';
+                ctx.beginPath();
+                ctx.arc(pos.x, pos.y, 7, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // 外圈 - 黄色虚线表示路径星系
+                ctx.strokeStyle = '#ffaa00';
+                ctx.lineWidth = 1.5;
+                ctx.setLineDash([2, 2]);
+                ctx.beginPath();
+                ctx.arc(pos.x, pos.y, 6, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                
+                // 内部填充
+                ctx.fillStyle = 'rgba(255, 170, 0, 0.3)';
+                ctx.beginPath();
+                ctx.arc(pos.x, pos.y, 5, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // 显示名称
+                if (system) {
+                    ctx.font = '10px "Segoe UI", system-ui, sans-serif';
+                    ctx.fillStyle = '#ffaa00';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'bottom';
+                    ctx.fillText(system.name, pos.x, pos.y - 10);
+                }
+            }
+        }
+        
+        // 绘制路径连线
+        for (const conn of this.pathConnections) {
+            const fromPos = pathSystemPositions.get(conn.from.id);
+            const toPos = pathSystemPositions.get(conn.to.id);
+            
+            if (!fromPos || !toPos) continue;
+            
+            const from = this.worldToScreen(fromPos);
+            const to = this.worldToScreen(toPos);
+            
+            // 全局检查是否有星门连接
+            const hasStargate = this.checkGlobalStargateConnection(conn.from.id, conn.to.id);
+            
+            ctx.beginPath();
+            ctx.moveTo(from.x, from.y);
+            ctx.lineTo(to.x, to.y);
+            
+            if (hasStargate) {
+                // 有星门连接 - 橙色高亮
+                ctx.strokeStyle = '#ffaa00';
+                ctx.lineWidth = 2.5;
+                ctx.setLineDash([]);
+            } else {
+                // 虚拟连接 - 蓝色虚线
+                ctx.strokeStyle = '#5a8fc7';
+                ctx.lineWidth = 1.5;
+                ctx.setLineDash([6, 4]);
+            }
+            
+            ctx.stroke();
+            ctx.setLineDash([]);
+            
+            // 绘制箭头
+            this.drawArrow(ctx, from, to, hasStargate ? '#ffaa00' : '#5a8fc7');
+        }
+        
+        // 高亮当前星域中的路径星系
+        for (const pathSys of this.pathSystems) {
+            const system = allSystems.get(pathSys.id);
+            if (system) {
+                const pos = this.worldToScreen(system.position2D);
+                ctx.strokeStyle = '#ffaa00';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(pos.x, pos.y, 10, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+        }
+    }
+    
+    calculateExternalAngle(system) {
+        // 计算从星域中心指向该星系的角度
+        if (!this.currentData) return Math.random() * Math.PI * 2;
+        
+        const centerX = this.currentData.bounds.centerX;
+        const centerY = this.currentData.bounds.centerY;
+        
+        const dirX = system.position2D.x - centerX;
+        const dirY = system.position2D.y - centerY;
+        
+        return Math.atan2(dirY, dirX);
+    }
+    
+    processExternalChain(externalId, externalPathPositions, processedExternal, 
+                        borderPos, baseAngle, allSystems) {
+        // 查找与这个外部星系相邻的路径星系
+        for (const conn of this.pathConnections) {
+            let neighborId = null;
+            
+            if (conn.from.id === externalId && !allSystems.has(conn.to.id)) {
+                neighborId = conn.to.id;
+            } else if (conn.to.id === externalId && !allSystems.has(conn.from.id)) {
+                neighborId = conn.from.id;
+            }
+            
+            if (neighborId && !processedExternal.has(neighborId)) {
+                // 继续沿着链的方向，增加距离
+                const currentPos = externalPathPositions.get(externalId);
+                if (currentPos) {
+                    // 在相同方向上再往外 15px
+                    externalPathPositions.set(neighborId, {
+                        x: borderPos.x + Math.cos(baseAngle) * 28,
+                        y: borderPos.y + Math.sin(baseAngle) * 28
+                    });
+                    processedExternal.add(neighborId);
+                    
+                    // 递归处理下一个
+                    this.processExternalChain(neighborId, externalPathPositions, processedExternal,
+                        borderPos, baseAngle, allSystems);
+                }
+            }
+        }
+    }
+    
+    checkStargateConnection(fromId, toId) {
+        if (!this.currentData) return false;
+        
+        // 检查内部连接
+        for (const conn of this.currentData.internalConnections) {
+            if ((conn.from === fromId && conn.to === toId) ||
+                (conn.from === toId && conn.to === fromId)) {
+                return true;
+            }
+        }
+        
+        // 检查外部连接
+        for (const conn of this.currentData.externalConnections) {
+            if ((conn.from === fromId && conn.to === toId) ||
+                (conn.from === toId && conn.to === fromId)) {
+                return true;
+            }
+        }
+        
+        return false;
+    }
+    
+    checkGlobalStargateConnection(fromId, toId) {
+        // 使用 dataLoader 的全局连接数据检查
+        const fromConnections = dataLoader.connections.get(fromId);
+        if (fromConnections) {
+            return fromConnections.includes(toId);
+        }
+        return false;
+    }
+    
+    drawArrow(ctx, from, to, color) {
+        const headLen = 8;
+        const angle = Math.atan2(to.y - from.y, to.x - from.x);
+        const arrowDist = 0.5; // 箭头位置在线段中间
+        
+        const arrowX = from.x + (to.x - from.x) * arrowDist;
+        const arrowY = from.y + (to.y - from.y) * arrowDist;
+        
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.moveTo(arrowX, arrowY);
+        ctx.lineTo(
+            arrowX - headLen * Math.cos(angle - Math.PI / 6),
+            arrowY - headLen * Math.sin(angle - Math.PI / 6)
+        );
+        ctx.lineTo(
+            arrowX - headLen * Math.cos(angle + Math.PI / 6),
+            arrowY - headLen * Math.sin(angle + Math.PI / 6)
+        );
+        ctx.closePath();
+        ctx.fill();
     }
     
     drawBackground() {
@@ -232,6 +513,12 @@ class MapRenderer {
         for (const system of externalSystems) {
             const pos = this.worldToScreen(system.position2D);
             
+            // 先用背景色清除图标区域（遮挡穿过的线）
+            ctx.fillStyle = '#0a0808'; // 背景色
+            this.drawRoundedRect(ctx, pos.x - halfSize - 1, pos.y - halfSize - 1, size + 2, size + 2, style.radius);
+            ctx.fill();
+            
+            // 再画图标
             ctx.fillStyle = 'rgba(150, 150, 150, 0.15)';
             ctx.strokeStyle = style.borderColor;
             ctx.lineWidth = style.borderWidth;
@@ -344,7 +631,7 @@ class MapRenderer {
             const isSelected = this.selectedSystem === system;
             const isExternal = system.isExternal;
             
-            if (isExternal && !isHovered && !isSelected) continue;
+            // 外部星系名称默认显示，不再跳过
             
             // 根据缩放级别控制标签密度（固定大小的文字）
             if (!isExternal && !isHovered && !isSelected) {
@@ -371,9 +658,7 @@ class MapRenderer {
                 ? 'rgba(180, 180, 180, 0.8)' 
                 : (isHovered || isSelected ? '#ffffff' : label.color);
             
-            const displayName = isExternal 
-                ? `${system.name} (${system.regionName || dataLoader.getRegionName(system.regionID)})`
-                : system.name;
+            const displayName = system.name;
             
             ctx.fillText(displayName, pos.x, pos.y + offsetY);
             
@@ -439,8 +724,8 @@ class MapRenderer {
     
     zoom(factor, centerX, centerY) {
         const oldZoom = this.viewport.zoom;
-        // 限制最小缩放为 0.5（不能缩得太远），最大为 10
-        const newZoom = Math.max(0.5, Math.min(10, oldZoom * factor));
+        // 限制缩放范围：最小4.0，最大20
+        const newZoom = Math.max(4.0, Math.min(20, oldZoom * factor));
         
         const zoomFactor = newZoom / oldZoom;
         this.viewport.x = centerX - (centerX - this.viewport.x) * zoomFactor;

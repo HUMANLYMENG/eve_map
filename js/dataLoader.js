@@ -1,5 +1,5 @@
 /**
- * 数据加载模块 - 使用 EVE 原生 position2D 坐标
+ * 数据加载模块 - 使用 Eveeye 坐标
  */
 
 class DataLoader {
@@ -8,6 +8,7 @@ class DataLoader {
         this.regions = new Map();
         this.constellations = new Map();
         this.connections = new Map();
+        this.eveeyeCoords = new Map(); // Eveeye 坐标
         this.loaded = false;
     }
 
@@ -15,12 +16,16 @@ class DataLoader {
         try {
             console.log('[DataLoader] 开始加载数据...');
             
-            const [systemsData, stargatesData, regionsData, constellationsData] = await Promise.all([
+            const [systemsData, stargatesData, regionsData, constellationsData, eveeyeData] = await Promise.all([
                 this.loadYAML('data/mapSolarSystems.yaml'),
                 this.loadYAML('data/mapStargates.yaml'),
                 this.loadJSONL('data/mapRegions.jsonl'),
-                this.loadJSONL('data/mapConstellations.jsonl')
+                this.loadJSONL('data/mapConstellations.jsonl'),
+                this.loadJSON('data/eveeye_universe_map.json')
             ]);
+
+            // 加载 Eveeye 坐标
+            this.processEveeyeCoords(eveeyeData);
 
             this.processRegions(regionsData);
             this.processConstellations(constellationsData);
@@ -38,6 +43,28 @@ class DataLoader {
             console.error('[DataLoader] 数据加载失败:', error);
             throw error;
         }
+    }
+
+    async loadJSON(url) {
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(`Failed to load ${url}: ${response.status}`);
+        }
+        return response.json();
+    }
+
+    processEveeyeCoords(data) {
+        // 处理 Eveeye 坐标数据
+        for (const node of data.nodes) {
+            const systemId = parseInt(node.id);
+            this.eveeyeCoords.set(systemId, {
+                x: node.x,
+                y: node.y,
+                label: node.label,
+                sec: node.sec
+            });
+        }
+        console.log(`[DataLoader] 加载 Eveeye 坐标: ${this.eveeyeCoords.size} 个星系`);
     }
 
     async loadYAML(url) {
@@ -90,35 +117,8 @@ class DataLoader {
     }
 
     processSystems(systemsData) {
-        // 收集所有 position2D 坐标来确定缩放
-        const positions2D = [];
-        
-        for (const [idStr, raw] of Object.entries(systemsData)) {
-            const id = parseInt(idStr);
-            if (id >= 31000000) continue; // 跳过虫洞
-            
-            if (raw.position2D) {
-                positions2D.push(raw.position2D);
-            }
-        }
-        
-        // 计算 position2D 的范围
-        let minX = Infinity, maxX = -Infinity;
-        let minY = Infinity, maxY = -Infinity;
-        
-        for (const pos of positions2D) {
-            minX = Math.min(minX, pos.x);
-            maxX = Math.max(maxX, pos.x);
-            minY = Math.min(minY, pos.y);
-            maxY = Math.max(maxY, pos.y);
-        }
-        
-        // 调整缩放因子 - 默认设置
-        const maxRange = Math.max(maxX - minX, maxY - minY);
-        this.coordinateScale = 1200 / maxRange;
-        
-        console.log('[DataLoader] position2D 范围:', { minX, maxX, minY, maxY });
-        console.log('[DataLoader] 坐标缩放因子:', this.coordinateScale);
+        // 使用 Eveeye 坐标
+        console.log('[DataLoader] 使用 Eveeye 坐标系统');
         
         // 处理星系数据
         for (const [idStr, raw] of Object.entries(systemsData)) {
@@ -126,7 +126,17 @@ class DataLoader {
             
             if (id >= 31000000) continue; // 跳过虫洞
 
-            const pos2D = raw.position2D || { x: 0, y: 0 };
+            // 获取 Eveeye 坐标
+            const eveeyeCoord = this.eveeyeCoords.get(id);
+            let pos2D;
+            
+            if (eveeyeCoord) {
+                // 使用 Eveeye 坐标（需要缩放）
+                pos2D = { x: eveeyeCoord.x, y: eveeyeCoord.y };
+            } else {
+                // 回退到原始坐标
+                pos2D = raw.position2D || { x: 0, y: 0 };
+            }
             
             const system = {
                 id,
@@ -137,8 +147,8 @@ class DataLoader {
                 securityStatus: raw.securityStatus ?? 0,
                 securityClass: this.getSecurityClass(raw.securityStatus),
                 position2D: {
-                    x: pos2D.x * this.coordinateScale,
-                    y: -pos2D.y * this.coordinateScale  // 翻转 Y，使 +Y 向上
+                    x: pos2D.x,
+                    y: pos2D.y
                 },
                 stargateIDs: raw.stargateIDs || [],
                 isBorder: raw.border || false,
@@ -254,26 +264,180 @@ class DataLoader {
             }
         }
 
-        // 收集相邻星域的星系（用于显示）
+        const bounds = this.calculateBounds(systems);
+
+        // 收集每个边界星系的所有连接角度（用于避免重叠）
+        const borderSystemAngles = new Map(); // systemId -> [angles]
+        
+        for (const system of systems) {
+            if (!system.isBorder) continue;
+            
+            const angles = [];
+            const connections = this.connections.get(system.id) || [];
+            
+            for (const targetId of connections) {
+                const target = this.systems.get(targetId);
+                if (!target) continue;
+                
+                // 只记录内部连接的角度
+                if (target.regionID === regionId) {
+                    const angle = Math.atan2(
+                        target.position2D.y - system.position2D.y,
+                        target.position2D.x - system.position2D.x
+                    );
+                    angles.push(angle);
+                }
+            }
+            
+            borderSystemAngles.set(system.id, angles);
+        }
+
+        // 计算外部星系的放置位置
+        // 策略：基于边界星系到星域中心的方向向外延伸，在可用间隙中均匀分布
+        const MIN_ANGLE_GAP = 1.05; // 最小角度间隔（约60度）
+        const EXTERNAL_DISTANCE_MIN = 4; // 最小距离
+        const EXTERNAL_DISTANCE_MAX = 9; // 最大距离
+        const EXTERNAL_DISTANCE_DEFAULT = 5; // 默认距离
+        
+        // 预计算每个边界星系的外向方向（远离星域中心）
+        const borderSystemOutboundAngles = new Map();
+        for (const system of systems) {
+            if (!system.isBorder) continue;
+            const dirX = system.position2D.x - bounds.centerX;
+            const dirY = system.position2D.y - bounds.centerY;
+            const angle = Math.atan2(dirY, dirX);
+            borderSystemOutboundAngles.set(system.id, angle);
+        }
+        
+        // 预计算每个边界星系的所有外部连接角度
+        const borderSystemExternalAngles = new Map(); // systemId -> [angles]
+        
+        // 全局已放置的位置（用于避免外部星系与任何星系重叠）
+        const globalExternalPositions = [];
+        const MIN_EXTERNAL_GAP = 35; // 外部星系之间的最小距离（世界坐标）
+        
+        // 首先将所有本星域星系位置加入全局检查
+        for (const system of systems) {
+            globalExternalPositions.push({ x: system.position2D.x, y: system.position2D.y });
+        }
+        
+        const calculateExternalPosition = (borderSystem, targetSystem, connectionIndex, totalConnections) => {
+            const internalAngles = borderSystemAngles.get(borderSystem.id) || [];
+            const outboundAngle = borderSystemOutboundAngles.get(borderSystem.id) || 0;
+            
+            // 获取已分配的外部角度
+            const assignedAngles = borderSystemExternalAngles.get(borderSystem.id) || [];
+            
+            // 所有禁止角度 = 内部角度 + 已分配的外部角度
+            const blockedAngles = [...internalAngles, ...assignedAngles];
+            
+            // 生成候选角度
+            const candidateAngles = [];
+            
+            if (blockedAngles.length === 0) {
+                candidateAngles.push(outboundAngle);
+            } else {
+                // 排序阻挡角度
+                const sorted = [...blockedAngles].sort((a, b) => a - b);
+                
+                // 检查所有间隙
+                for (let i = 0; i < sorted.length; i++) {
+                    const current = sorted[i];
+                    const next = sorted[(i + 1) % sorted.length];
+                    let gapStart = current;
+                    let gapEnd = next;
+                    if (gapEnd <= gapStart) gapEnd += Math.PI * 2;
+                    
+                    const gapSize = gapEnd - gapStart;
+                    if (gapSize >= MIN_ANGLE_GAP) {
+                        // 在间隙中心放置
+                        const centerAngle = gapStart + gapSize / 2;
+                        const normalizedAngle = ((centerAngle % (Math.PI * 2)) + (Math.PI * 2)) % (Math.PI * 2);
+                        const diff = Math.abs(normalizedAngle - outboundAngle);
+                        const wrappedDiff = Math.min(diff, Math.PI * 2 - diff);
+                        candidateAngles.push(normalizedAngle);
+                    }
+                }
+                
+                // 如果没有合适间隙，使用外向方向偏移
+                if (candidateAngles.length === 0) {
+                    for (let i = 0; i < 8; i++) {
+                        candidateAngles.push(outboundAngle + (i - 4) * 0.4);
+                    }
+                }
+            }
+            
+            // 尝试不同的距离，找到不与全局位置冲突的最佳位置
+            let bestAngle = candidateAngles[0] || outboundAngle;
+            let bestDistance = EXTERNAL_DISTANCE_DEFAULT;
+            let found = false;
+            
+            for (const angle of candidateAngles) {
+                for (let dist = EXTERNAL_DISTANCE_MIN; dist <= EXTERNAL_DISTANCE_MAX; dist += 1) {
+                    const x = borderSystem.position2D.x + Math.cos(angle) * dist;
+                    const y = borderSystem.position2D.y + Math.sin(angle) * dist;
+                    
+                    // 检查与全局位置的距离
+                    let tooClose = false;
+                    for (const pos of globalExternalPositions) {
+                        const dx = x - pos.x;
+                        const dy = y - pos.y;
+                        const d = Math.sqrt(dx * dx + dy * dy);
+                        if (d < MIN_EXTERNAL_GAP) {
+                            tooClose = true;
+                            break;
+                        }
+                    }
+                    
+                    if (!tooClose) {
+                        bestAngle = angle;
+                        bestDistance = dist;
+                        found = true;
+                        break;
+                    }
+                }
+                if (found) break;
+            }
+            
+            // 记录已分配的角度
+            assignedAngles.push(bestAngle);
+            borderSystemExternalAngles.set(borderSystem.id, assignedAngles);
+            
+            const result = {
+                x: borderSystem.position2D.x + Math.cos(bestAngle) * bestDistance,
+                y: borderSystem.position2D.y + Math.sin(bestAngle) * bestDistance
+            };
+            
+            // 记录到全局位置
+            globalExternalPositions.push(result);
+            
+            return result;
+        };
+
+        // 收集相邻星域的星系（用于显示）- 使用真实坐标（Eveeye风格）
         for (const system of systems) {
             const connections = this.connections.get(system.id) || [];
+            
             for (const targetId of connections) {
                 const target = this.systems.get(targetId);
                 if (target && target.regionID !== regionId) {
-                    // 标记为外部星系
-                    if (!externalSystems.has(targetId)) {
-                        externalSystems.set(targetId, {
+                    // 使用真实坐标，每个连接独立显示
+                    const uniqueKey = `${system.id}-${targetId}`;
+                    
+                    if (!externalSystems.has(uniqueKey)) {
+                        externalSystems.set(uniqueKey, {
                             ...target,
-                            isExternal: true,  // 标记为外部星系
-                            connectedFrom: system.id,  // 从哪个本星域星系连接过来
-                            connectedFromName: system.name
+                            isExternal: true,
+                            connectedFrom: system.id,
+                            connectedFromName: system.name,
+                            // 使用真实坐标
+                            position2D: target.position2D,
+                            uniqueKey: uniqueKey
                         });
                     }
                 }
             }
         }
-
-        const bounds = this.calculateBounds(systems);
 
         const internalConnections = [];
         const externalConnections = [];
@@ -284,9 +448,9 @@ class DataLoader {
                 const target = this.systems.get(targetId);
                 if (!target) continue;
 
-                if (system.id >= targetId) continue;
-
                 if (target.regionID === regionId) {
+                    // 内部连接：避免重复
+                    if (system.id >= targetId) continue;
                     internalConnections.push({
                         from: system.id,
                         to: targetId,
@@ -294,16 +458,22 @@ class DataLoader {
                         toPos: target.position2D
                     });
                 } else {
-                    externalConnections.push({
-                        from: system.id,
-                        to: targetId,
-                        fromPos: system.position2D,
-                        toPos: target.position2D,
-                        targetRegion: target.regionID,
-                        targetRegionName: this.getRegionName(target.regionID),
-                        targetSystem: target.name,
-                        targetSystemObj: target  // 保存目标星系对象引用
-                    });
+                    // 外部连接：每个边界星系到外部星系的连接都要画
+                    // 使用唯一键查找对应的外部星系实例
+                    const uniqueKey = `${system.id}-${targetId}`;
+                    const externalInstance = externalSystems.get(uniqueKey);
+                    if (externalInstance) {
+                        externalConnections.push({
+                            from: system.id,
+                            to: targetId,
+                            fromPos: system.position2D,
+                            toPos: externalInstance.position2D,
+                            targetRegion: target.regionID,
+                            targetRegionName: this.getRegionName(target.regionID),
+                            targetSystem: target.name,
+                            targetSystemObj: target
+                        });
+                    }
                 }
             }
         }
@@ -312,7 +482,7 @@ class DataLoader {
             region,
             systems,
             borderSystems,
-            externalSystems: Array.from(externalSystems.values()), // 转换为数组
+            externalSystems: Array.from(externalSystems.values()),
             bounds,
             internalConnections,
             externalConnections

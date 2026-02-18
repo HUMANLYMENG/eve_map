@@ -84,6 +84,23 @@
                     </div>
                 </div>
 
+                <!-- 虫洞记录 -->
+                <div class="panel-section" id="wormholePanel">
+                    <h3>虫洞记录</h3>
+                    <div class="wormhole-table">
+                        <p class="placeholder">暂无虫洞记录</p>
+                    </div>
+                </div>
+
+                <!-- 路径记录 -->
+                <div class="panel-section" id="pathPanel">
+                    <h3>路径记录 <span class="path-count">(显示最近6个)</span></h3>
+                    <div class="path-list">
+                        <p class="placeholder">点击星系记录路径</p>
+                    </div>
+                    <button class="clear-path-btn" onclick="window.app.clearPath()">清除路径</button>
+                </div>
+
                 <!-- 控制说明 -->
                 <div class="panel-section controls-help">
                     <h3>操作说明</h3>
@@ -100,9 +117,9 @@
 
     <!-- 使用 js-yaml 库解析 YAML -->
     <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
-    <script src="js/dataLoader.js?v=5"></script>
-    <script src="js/mapRenderer.js?v=5"></script>
-    <script src="js/interaction.js?v=5"></script>
-    <script src="js/main.js?v=5"></script>
+    <script src="js/dataLoader.js?v=40"></script>
+    <script src="js/mapRenderer.js?v=40"></script>
+    <script src="js/interaction.js?v=40"></script>
+    <script src="js/main.js?v=40"></script>
 </body>
 </html>
