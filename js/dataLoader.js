@@ -1,5 +1,5 @@
 /**
- * 数据加载模块 - 使用 Eveeye 坐标
+ * 数据加载模块 - 使用 SDE position2D 坐标
  */
 
 class DataLoader {
@@ -8,7 +8,6 @@ class DataLoader {
         this.regions = new Map();
         this.constellations = new Map();
         this.connections = new Map();
-        this.eveeyeCoords = new Map(); // Eveeye 坐标
         this.loaded = false;
     }
 
@@ -16,16 +15,12 @@ class DataLoader {
         try {
             console.log('[DataLoader] 开始加载数据...');
             
-            const [systemsData, stargatesData, regionsData, constellationsData, eveeyeData] = await Promise.all([
+            const [systemsData, stargatesData, regionsData, constellationsData] = await Promise.all([
                 this.loadYAML('data/mapSolarSystems.yaml'),
                 this.loadYAML('data/mapStargates.yaml'),
                 this.loadJSONL('data/mapRegions.jsonl'),
-                this.loadJSONL('data/mapConstellations.jsonl'),
-                this.loadJSON('data/eveeye_universe_map.json')
+                this.loadJSONL('data/mapConstellations.jsonl')
             ]);
-
-            // 加载 Eveeye 坐标
-            this.processEveeyeCoords(eveeyeData);
 
             this.processRegions(regionsData);
             this.processConstellations(constellationsData);
@@ -43,28 +38,6 @@ class DataLoader {
             console.error('[DataLoader] 数据加载失败:', error);
             throw error;
         }
-    }
-
-    async loadJSON(url) {
-        const response = await fetch(url);
-        if (!response.ok) {
-            throw new Error(`Failed to load ${url}: ${response.status}`);
-        }
-        return response.json();
-    }
-
-    processEveeyeCoords(data) {
-        // 处理 Eveeye 坐标数据
-        for (const node of data.nodes) {
-            const systemId = parseInt(node.id);
-            this.eveeyeCoords.set(systemId, {
-                x: node.x,
-                y: node.y,
-                label: node.label,
-                sec: node.sec
-            });
-        }
-        console.log(`[DataLoader] 加载 Eveeye 坐标: ${this.eveeyeCoords.size} 个星系`);
     }
 
     async loadYAML(url) {
@@ -117,26 +90,16 @@ class DataLoader {
     }
 
     processSystems(systemsData) {
-        // 使用 Eveeye 坐标
-        console.log('[DataLoader] 使用 Eveeye 坐标系统');
+        // 使用 SDE 中的 position2D 坐标（使用原始坐标）
+        console.log('[DataLoader] 使用 SDE position2D 坐标系统');
         
-        // 处理星系数据
         for (const [idStr, raw] of Object.entries(systemsData)) {
             const id = parseInt(idStr);
             
             if (id >= 31000000) continue; // 跳过虫洞
 
-            // 获取 Eveeye 坐标
-            const eveeyeCoord = this.eveeyeCoords.get(id);
-            let pos2D;
-            
-            if (eveeyeCoord) {
-                // 使用 Eveeye 坐标（需要缩放）
-                pos2D = { x: eveeyeCoord.x, y: eveeyeCoord.y };
-            } else {
-                // 回退到原始坐标
-                pos2D = raw.position2D || { x: 0, y: 0 };
-            }
+            // 使用 SDE 中的原始 position2D 坐标
+            const pos2D = raw.position2D || { x: 0, y: 0 };
             
             const system = {
                 id,
@@ -295,9 +258,11 @@ class DataLoader {
         // 计算外部星系的放置位置
         // 策略：基于边界星系到星域中心的方向向外延伸，在可用间隙中均匀分布
         const MIN_ANGLE_GAP = 1.05; // 最小角度间隔（约60度）
-        const EXTERNAL_DISTANCE_MIN = 4; // 最小距离
-        const EXTERNAL_DISTANCE_MAX = 9; // 最大距离
-        const EXTERNAL_DISTANCE_DEFAULT = 5; // 默认距离
+        // 使用星域大小的百分比作为距离（更小的距离，与路径外部星系一致）
+        const domainScale = Math.max(bounds.width, bounds.height);
+        const EXTERNAL_DISTANCE_MIN = domainScale * 0.015; // 1.5% 星域大小
+        const EXTERNAL_DISTANCE_MAX = domainScale * 0.035; // 3.5% 星域大小
+        const EXTERNAL_DISTANCE_DEFAULT = domainScale * 0.025; // 2.5% 星域大小
         
         // 预计算每个边界星系的外向方向（远离星域中心）
         const borderSystemOutboundAngles = new Map();
@@ -314,7 +279,7 @@ class DataLoader {
         
         // 全局已放置的位置（用于避免外部星系与任何星系重叠）
         const globalExternalPositions = [];
-        const MIN_EXTERNAL_GAP = 35; // 外部星系之间的最小距离（世界坐标）
+        const MIN_EXTERNAL_GAP = domainScale * 0.02; // 2% 星域大小
         
         // 首先将所有本星域星系位置加入全局检查
         for (const system of systems) {
