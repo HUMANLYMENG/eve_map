@@ -258,11 +258,11 @@ class DataLoader {
         // 计算外部星系的放置位置
         // 策略：基于边界星系到星域中心的方向向外延伸，在可用间隙中均匀分布
         const MIN_ANGLE_GAP = 1.05; // 最小角度间隔（约60度）
-        // 使用星域大小的百分比作为距离（更小的距离，与路径外部星系一致）
+        // 星门连接外部星系使用与路径外部星系相同的距离
         const domainScale = Math.max(bounds.width, bounds.height);
-        const EXTERNAL_DISTANCE_MIN = domainScale * 0.015; // 1.5% 星域大小
-        const EXTERNAL_DISTANCE_MAX = domainScale * 0.035; // 3.5% 星域大小
-        const EXTERNAL_DISTANCE_DEFAULT = domainScale * 0.025; // 2.5% 星域大小
+        const EXTERNAL_DISTANCE_MIN = domainScale * 0.06; // 6% 星域大小
+        const EXTERNAL_DISTANCE_MAX = domainScale * 0.10; // 10% 星域大小
+        const EXTERNAL_DISTANCE_DEFAULT = domainScale * 0.08; // 8% 星域大小
         
         // 预计算每个边界星系的外向方向（远离星域中心）
         const borderSystemOutboundAngles = new Map();
@@ -279,7 +279,7 @@ class DataLoader {
         
         // 全局已放置的位置（用于避免外部星系与任何星系重叠）
         const globalExternalPositions = [];
-        const MIN_EXTERNAL_GAP = domainScale * 0.02; // 2% 星域大小
+        const MIN_EXTERNAL_GAP = domainScale * 0.01; // 1% 星域大小
         
         // 首先将所有本星域星系位置加入全局检查
         for (const system of systems) {
@@ -337,8 +337,11 @@ class DataLoader {
             let bestDistance = EXTERNAL_DISTANCE_DEFAULT;
             let found = false;
             
+            // 计算步长（基于距离范围的 1/10）
+            const step = (EXTERNAL_DISTANCE_MAX - EXTERNAL_DISTANCE_MIN) / 10;
+            
             for (const angle of candidateAngles) {
-                for (let dist = EXTERNAL_DISTANCE_MIN; dist <= EXTERNAL_DISTANCE_MAX; dist += 1) {
+                for (let dist = EXTERNAL_DISTANCE_MIN; dist <= EXTERNAL_DISTANCE_MAX; dist += step) {
                     const x = borderSystem.position2D.x + Math.cos(angle) * dist;
                     const y = borderSystem.position2D.y + Math.sin(angle) * dist;
                     
@@ -379,24 +382,27 @@ class DataLoader {
             return result;
         };
 
-        // 收集相邻星域的星系（用于显示）- 使用真实坐标（Eveeye风格）
+        // 收集相邻星域的星系（用于显示）- 使用虚拟坐标（靠近边界星系）
         for (const system of systems) {
             const connections = this.connections.get(system.id) || [];
             
             for (const targetId of connections) {
                 const target = this.systems.get(targetId);
                 if (target && target.regionID !== regionId) {
-                    // 使用真实坐标，每个连接独立显示
+                    // 使用虚拟坐标，每个连接独立显示
                     const uniqueKey = `${system.id}-${targetId}`;
                     
                     if (!externalSystems.has(uniqueKey)) {
+                        // 计算虚拟位置（靠近边界星系）
+                        const virtualPos = calculateExternalPosition(system, target, 0, 1);
+                        
                         externalSystems.set(uniqueKey, {
                             ...target,
                             isExternal: true,
                             connectedFrom: system.id,
                             connectedFromName: system.name,
-                            // 使用真实坐标
-                            position2D: target.position2D,
+                            // 使用虚拟坐标（靠近边界星系）
+                            position2D: virtualPos,
                             uniqueKey: uniqueKey
                         });
                     }

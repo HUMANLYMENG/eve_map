@@ -359,8 +359,8 @@ class MapRenderer {
             }
         }
         
-        // 偏移距离：3% 星域大小
-        const baseOffset = domainSize * 0.025;
+        // 偏移距离：8% 星域大小（与星门连接外部星系一致）
+        const baseOffset = domainSize * 0.08;
         const minGap = domainSize * 0.015;
         
         // 迭代放置外部星系（优先放置连接到当前星域的）
