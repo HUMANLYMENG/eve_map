@@ -348,14 +348,36 @@ body {
     opacity: 1;
 }
 
-/* ==================== 侧面板 ==================== */
-.side-panel {
-    width: 320px;
+/* ==================== 拖动分隔条 ==================== */
+.resizer {
+    width: 6px;
     background: var(--bg-secondary);
     border-left: 1px solid var(--border-color);
+    border-right: 1px solid var(--border-color);
+    cursor: col-resize;
+    transition: background 0.2s;
+    flex-shrink: 0;
+}
+
+.resizer:hover {
+    background: var(--accent-blue);
+}
+
+.resizer.resizing {
+    background: var(--accent-blue);
+}
+
+/* ==================== 侧面板 ==================== */
+.side-panel {
+    width: 340px;
+    min-width: 260px;
+    max-width: 500px;
+    background: var(--bg-secondary);
     display: flex;
     flex-direction: column;
     overflow-y: auto;
+    overflow-x: hidden;
+    flex-shrink: 0;
 }
 
 .panel-section {
@@ -475,7 +497,8 @@ body {
 
 /* ==================== 响应式 ==================== */
 @media (max-width: 900px) {
-    .side-panel {
+    .side-panel,
+    .resizer {
         display: none;
     }
     
@@ -682,25 +705,27 @@ body {
 /* ==================== 虫洞表格 ==================== */
 .wormhole-table {
     max-height: 200px;
-    overflow-y: auto;
+    overflow: auto;
 }
 
 .wormhole-data-table {
-    width: 100%;
+    min-width: 380px;
+    width: max-content;
     font-size: 11px;
     border-collapse: collapse;
+    white-space: nowrap;
 }
 
 .wormhole-data-table th {
     text-align: left;
-    padding: 6px 4px;
+    padding: 6px 8px;
     color: var(--text-secondary);
     border-bottom: 1px solid var(--border-color);
     font-weight: 600;
 }
 
 .wormhole-data-table td {
-    padding: 6px 4px;
+    padding: 6px 8px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.05);
     color: var(--text-primary);
 }
@@ -816,4 +841,146 @@ body {
 
 .path-item:hover .path-name {
     color: var(--accent-blue);
+}
+
+
+/* ==================== EVE Scout 集成样式 ==================== */
+
+/* 虫洞面板头部 */
+.wormhole-panel-header {
+    margin-bottom: 12px;
+}
+
+/* 标签切换 */
+.wormhole-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 8px;
+}
+
+.wh-tab {
+    flex: 1;
+    padding: 5px 8px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--text-secondary);
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.wh-tab:hover {
+    border-color: var(--accent-blue);
+    color: var(--text-primary);
+}
+
+.wh-tab.active {
+    background: rgba(90, 143, 199, 0.2);
+    border-color: var(--accent-blue);
+    color: var(--accent-blue);
+}
+
+/* 操作区域 */
+.wormhole-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.btn-refresh {
+    width: 28px;
+    height: 28px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.btn-refresh:hover {
+    border-color: var(--accent-blue);
+    background: rgba(90, 143, 199, 0.1);
+}
+
+.btn-refresh.spinning {
+    animation: spin 1s linear infinite;
+}
+
+.last-updated {
+    font-size: 10px;
+    color: var(--text-secondary);
+}
+
+/* 来源标记 */
+.wormhole-data-table tr.evescout td {
+    background: rgba(90, 199, 143, 0.05);
+}
+
+.readonly-tag {
+    display: inline-block;
+    padding: 2px 6px;
+    background: rgba(154, 154, 154, 0.15);
+    border: 1px solid rgba(154, 154, 154, 0.3);
+    border-radius: 3px;
+    font-size: 10px;
+    color: var(--text-secondary);
+    cursor: help;
+}
+
+/* ==================== 表格列宽优化 ==================== */
+.wormhole-data-table th,
+.wormhole-data-table td {
+    white-space: nowrap;
+}
+
+/* 列1: 起点↔终点 */
+.wormhole-data-table th:nth-child(1),
+.wormhole-data-table td:nth-child(1) {
+    min-width: 120px;
+}
+
+/* 列2: 大小 */
+.wormhole-data-table th:nth-child(2),
+.wormhole-data-table td:nth-child(2) {
+    min-width: 40px;
+    text-align: center;
+}
+
+/* 列3: 书签名 */
+.wormhole-data-table th:nth-child(3),
+.wormhole-data-table td:nth-child(3) {
+    min-width: 120px;
+}
+
+/* 列4: 剩余时间 */
+.wormhole-data-table th:nth-child(4),
+.wormhole-data-table td:nth-child(4) {
+    min-width: 70px;
+}
+
+/* 列5: 类型 */
+.wormhole-data-table th:nth-child(5),
+.wormhole-data-table td:nth-child(5) {
+    min-width: 45px;
+    text-align: center;
+}
+
+/* 列6: 来源 */
+.wormhole-data-table th:nth-child(6),
+.wormhole-data-table td:nth-child(6) {
+    min-width: 50px;
+    text-align: center;
+}
+
+/* 列7: 操作 */
+.wormhole-data-table th:nth-child(7),
+.wormhole-data-table td:nth-child(7) {
+    min-width: 70px;
+    text-align: center;
 }

@@ -20,7 +20,17 @@ const WORMHOLE_TYPES = [
 
 class WormholeRecord {
     constructor(data) {
-        this.id = Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+        // 数据来源标记: 'local' | 'evescout'
+        this.source = data.source || 'local';
+        
+        // ID 生成
+        if (this.source === 'evescout' && data.evescoutId) {
+            this.id = `es-${data.evescoutId}`;
+            this.evescoutId = data.evescoutId;
+        } else {
+            this.id = Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+        }
+        
         this.fromSystem = data.fromSystem;
         this.toSystem = data.toSystem;
         this.fromSignal = data.fromSignal;
@@ -28,10 +38,25 @@ class WormholeRecord {
         this.type = data.type;
         this.size = data.size;
         this.maxLife = data.maxLife;
-        this.recordTime = Date.now();
-        // 计算过期时间
-        const lifeHours = { '1h': 1, '4h': 4, '1d': 24, '2d': 48 };
-        this.expiresAt = this.recordTime + (lifeHours[data.maxLife] || 24) * 60 * 60 * 1000;
+        
+        // 记录时间（EVE Scout 数据使用服务器时间）
+        this.recordTime = data.recordTime || Date.now();
+        
+        // 过期时间（EVE Scout 数据直接提供）
+        if (data.expiresAt) {
+            this.expiresAt = data.expiresAt;
+        } else {
+            const lifeHours = { '1h': 1, '4h': 4, '1d': 24, '2d': 48 };
+            this.expiresAt = this.recordTime + (lifeHours[data.maxLife] || 24) * 60 * 60 * 1000;
+        }
+        
+        // EVE Scout 特有字段
+        if (this.source === 'evescout') {
+            this.createdBy = data.createdBy;
+            this.inSystemClass = data.inSystemClass;
+            this.inRegionName = data.inRegionName;
+            this.whExitsOutward = data.whExitsOutward;
+        }
     }
     
     getRemainingTime() {
@@ -57,6 +82,24 @@ class WormholeRecord {
         return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
     }
     
+    getSourceLabel() {
+        if (this.source === 'evescout') {
+            return '🌐 ES';
+        }
+        return '📝 本地';
+    }
+    
+    getSourceTitle() {
+        if (this.source === 'evescout') {
+            return `EVE Scout · ${this.createdBy || '未知'}`;
+        }
+        return '本地记录';
+    }
+    
+    isEditable() {
+        return this.source === 'local';
+    }
+    
     getBookmarks() {
         const bookmarks = [];
         if (this.fromSignal && this.fromSignal !== '未知') {
@@ -76,6 +119,25 @@ class WormholeRecord {
     
     getKey() {
         return `${this.fromSystem}-${this.toSystem}-${this.type}`;
+    }
+    
+    /**
+     * 检查是否与另一个记录是同一虫洞（双向比较）
+     * @param {WormholeRecord} other 
+     * @returns {boolean}
+     */
+    isSameWormhole(other) {
+        if (this.type !== other.type) return false;
+        
+        // 正向匹配
+        const forwardMatch = this.fromSystem === other.fromSystem && 
+                             this.toSystem === other.toSystem;
+        
+        // 反向匹配
+        const reverseMatch = this.fromSystem === other.toSystem && 
+                             this.toSystem === other.fromSystem;
+        
+        return forwardMatch || reverseMatch;
     }
 }
 
@@ -168,9 +230,12 @@ class RegionalMapApp {
         this.currentRegionId = null;
         this.pendingSelection = null;
         this.pathRecorder = new PathRecorder(6); // 路径记录器
-        this.wormholeRecords = []; // 虫洞记录
+        this.wormholeRecords = []; // 本地虫洞记录
+        this.eveScoutRecords = []; // EVE Scout 虫洞记录
         this.detectedWormholes = new Set(); // 已检测到的虫洞，避免重复提示
         this.wormholeTimer = null; // 倒计时定时器
+        this.wormholeFilter = 'all'; // 虫洞显示过滤器: 'all' | 'local' | 'evescout'
+        this.eveScoutRefreshTimer = null; // 自动刷新定时器
         
         this.elements = {
             regionSelect: document.getElementById('regionSelect'),
@@ -181,7 +246,10 @@ class RegionalMapApp {
             searchResults: document.getElementById('searchResults'),
             pathList: document.querySelector('#pathPanel .path-list'),
             pathPanel: document.getElementById('pathPanel'),
-            wormholeTable: document.querySelector('#wormholePanel .wormhole-table')
+            wormholeTable: document.querySelector('#wormholePanel .wormhole-table'),
+            wormholeTabs: null, // 将在初始化后设置
+            refreshEveScoutBtn: null, // 将在初始化后设置
+            lastUpdatedText: null // 将在初始化后设置
         };
         
         this.init();
@@ -204,6 +272,10 @@ class RegionalMapApp {
             
             this.populateRegionSelector();
             this.bindEvents();
+            this.initWormholePanel();
+            
+            // 加载 EVE Scout 数据（异步，不阻塞）
+            this.loadEveScoutData();
             
             // 默认选择耶舒尔 (Yeeshur) 所在星域并聚焦
             this.selectRegion(10000064, 30005008, true);
@@ -234,6 +306,73 @@ class RegionalMapApp {
         
         // 搜索事件绑定
         this.bindSearchEvents();
+        
+        // 侧面板拖动调整大小
+        this.bindResizerEvents();
+    }
+    
+    bindResizerEvents() {
+        const resizer = document.getElementById('panelResizer');
+        const sidePanel = document.getElementById('sidePanel');
+        
+        if (!resizer || !sidePanel) return;
+        
+        let isResizing = false;
+        let startX = 0;
+        let startWidth = 0;
+        
+        const onMouseDown = (e) => {
+            isResizing = true;
+            startX = e.clientX;
+            startWidth = sidePanel.offsetWidth;
+            
+            resizer.classList.add('resizing');
+            document.body.style.cursor = 'col-resize';
+            document.body.style.userSelect = 'none'; // 防止选择文本
+            
+            e.preventDefault();
+        };
+        
+        const onMouseMove = (e) => {
+            if (!isResizing) return;
+            
+            const diff = startX - e.clientX; // 向左拖动是增加宽度
+            const newWidth = Math.max(260, Math.min(500, startWidth + diff));
+            
+            sidePanel.style.width = newWidth + 'px';
+        };
+        
+        const onMouseUp = () => {
+            if (!isResizing) return;
+            
+            isResizing = false;
+            resizer.classList.remove('resizing');
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            
+            // 触发 Canvas 重新调整大小
+            if (this.renderer) {
+                this.renderer.resize();
+            }
+        };
+        
+        resizer.addEventListener('mousedown', onMouseDown);
+        document.addEventListener('mousemove', onMouseMove);
+        document.addEventListener('mouseup', onMouseUp);
+        
+        // 触摸设备支持
+        resizer.addEventListener('touchstart', (e) => {
+            const touch = e.touches[0];
+            onMouseDown({ clientX: touch.clientX, preventDefault: () => {} });
+        });
+        
+        document.addEventListener('touchmove', (e) => {
+            if (!isResizing) return;
+            const touch = e.touches[0];
+            onMouseMove({ clientX: touch.clientX });
+        });
+        
+        document.addEventListener('touchend', onMouseUp);
     }
     
     bindSearchEvents() {
@@ -717,12 +856,178 @@ class RegionalMapApp {
         });
     }
     
+    // ========== EVE Scout 集成方法 ==========
+    
+    /**
+     * 初始化虫洞面板 UI
+     */
+    initWormholePanel() {
+        const panel = document.getElementById('wormholePanel');
+        if (!panel) return;
+        
+        // 创建面板头部（标签和刷新按钮）
+        const header = document.createElement('div');
+        header.className = 'wormhole-panel-header';
+        header.innerHTML = `
+            <div class="wormhole-tabs">
+                <button class="wh-tab active" data-filter="all">全部</button>
+                <button class="wh-tab" data-filter="local">本地</button>
+                <button class="wh-tab" data-filter="evescout">EVE Scout</button>
+            </div>
+            <div class="wormhole-actions">
+                <button id="refreshEveScout" class="btn-refresh" title="刷新 EVE Scout 数据">🔄</button>
+                <span id="lastUpdated" class="last-updated"></span>
+            </div>
+        `;
+        
+        // 插入到面板标题后面
+        const title = panel.querySelector('h3');
+        if (title) {
+            title.after(header);
+        } else {
+            panel.insertBefore(header, panel.firstChild);
+        }
+        
+        // 更新元素引用
+        this.elements.wormholeTabs = header.querySelector('.wormhole-tabs');
+        this.elements.refreshEveScoutBtn = header.querySelector('#refreshEveScout');
+        this.elements.lastUpdatedText = header.querySelector('#lastUpdated');
+        
+        // 绑定标签切换事件
+        this.elements.wormholeTabs.querySelectorAll('.wh-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                this.elements.wormholeTabs.querySelectorAll('.wh-tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                this.wormholeFilter = tab.dataset.filter;
+                this.updateWormholeTable();
+            });
+        });
+        
+        // 绑定刷新按钮
+        this.elements.refreshEveScoutBtn.addEventListener('click', () => {
+            this.refreshEveScoutData();
+        });
+    }
+    
+    /**
+     * 获取过滤后的虫洞记录列表
+     */
+    getFilteredWormholeRecords() {
+        let records = [];
+        
+        switch (this.wormholeFilter) {
+            case 'local':
+                records = this.wormholeRecords;
+                break;
+            case 'evescout':
+                records = this.eveScoutRecords;
+                break;
+            case 'all':
+            default:
+                // 合并本地和 EVE Scout 记录，去除重复
+                records = this.mergeWormholeRecords(this.wormholeRecords, this.eveScoutRecords);
+                break;
+        }
+        
+        return records;
+    }
+    
+    /**
+     * 合并本地和 EVE Scout 记录，去除重复（以本地记录优先）
+     */
+    mergeWormholeRecords(localRecords, esRecords) {
+        const merged = [...localRecords];
+        const localKeys = new Set(localRecords.map(r => r.getKey()));
+        
+        for (const esRecord of esRecords) {
+            // 检查是否已存在相同的本地记录
+            const isDuplicate = localKeys.has(esRecord.getKey()) ||
+                localRecords.some(local => local.isSameWormhole(esRecord));
+            
+            if (!isDuplicate) {
+                merged.push(esRecord);
+            }
+        }
+        
+        return merged;
+    }
+    
+    /**
+     * 加载 EVE Scout 数据
+     */
+    async loadEveScoutData() {
+        try {
+            if (typeof eveScoutService === 'undefined') {
+                console.warn('[App] EVE Scout 服务不可用');
+                return;
+            }
+            
+            const records = await eveScoutService.getWormholeRecords();
+            this.eveScoutRecords = records.map(data => new WormholeRecord(data));
+            
+            this.updateLastUpdatedText();
+            this.updateWormholeTable();
+            
+            console.log(`[App] 加载了 ${this.eveScoutRecords.length} 条 EVE Scout 记录`);
+            
+        } catch (error) {
+            console.error('[App] 加载 EVE Scout 数据失败:', error);
+            this.showToast('EVE Scout 数据加载失败', 'error');
+        }
+    }
+    
+    /**
+     * 刷新 EVE Scout 数据
+     */
+    async refreshEveScoutData() {
+        if (typeof eveScoutService === 'undefined') {
+            this.showToast('EVE Scout 服务不可用', 'error');
+            return;
+        }
+        
+        this.elements.refreshEveScoutBtn.classList.add('spinning');
+        
+        try {
+            eveScoutService.clearCache();
+            await this.loadEveScoutData();
+            this.showToast('EVE Scout 数据已刷新');
+        } catch (error) {
+            this.showToast('刷新失败: ' + error.message, 'error');
+        } finally {
+            this.elements.refreshEveScoutBtn.classList.remove('spinning');
+        }
+    }
+    
+    /**
+     * 更新最后更新时间显示
+     */
+    updateLastUpdatedText() {
+        if (!this.elements.lastUpdatedText) return;
+        
+        if (typeof eveScoutService !== 'undefined') {
+            const status = eveScoutService.getCacheStatus();
+            if (status.hasCache) {
+                this.elements.lastUpdatedText.textContent = status.ageText;
+                this.elements.lastUpdatedText.title = `共 ${status.count} 条记录`;
+            } else {
+                this.elements.lastUpdatedText.textContent = '未更新';
+            }
+        }
+    }
+    
+    // ========== 虫洞表格更新 ==========
+    
     updateWormholeTable() {
         const container = this.elements.wormholeTable;
         if (!container) return;
         
-        if (this.wormholeRecords.length === 0) {
-            container.innerHTML = '<p class="placeholder">暂无虫洞记录</p>';
+        const records = this.getFilteredWormholeRecords();
+        
+        if (records.length === 0) {
+            const emptyText = this.wormholeFilter === 'evescout' 
+                ? '暂无 EVE Scout 虫洞记录' 
+                : '暂无虫洞记录';
+            container.innerHTML = `<p class="placeholder">${emptyText}</p>`;
             return;
         }
         
@@ -731,22 +1036,24 @@ class RegionalMapApp {
                 <thead>
                     <tr>
                         <th>起点↔终点</th>
-                        <th>类型</th>
                         <th>大小</th>
-                        <th>记录时间</th>
-                        <th>剩余</th>
                         <th>书签名</th>
+                        <th>剩余时间</th>
+                        <th>类型</th>
+                        <th>来源</th>
                         <th>操作</th>
                     </tr>
                 </thead>
                 <tbody>
         `;
         
-        this.wormholeRecords.forEach((record, index) => {
+        records.forEach((record, index) => {
             const remaining = record.getRemainingTime();
             const expired = remaining === '已过期';
-            const recordTime = record.getFormattedRecordTime();
             const bookmarks = record.getBookmarks();
+            const sourceLabel = record.getSourceLabel();
+            const sourceTitle = record.getSourceTitle();
+            const isEditable = record.isEditable();
             
             let bookmarksHtml = '';
             if (bookmarks.length > 0) {
@@ -757,18 +1064,26 @@ class RegionalMapApp {
                 bookmarksHtml = '<span class="bookmark-tag-empty">无信号</span>';
             }
             
+            // 操作按钮（本地记录可编辑/删除，EVE Scout 只读）
+            let actionButtons = '';
+            if (isEditable) {
+                actionButtons = `
+                    <button class="btn-edit-wh" data-record-id="${record.id}" data-source="${record.source}">编辑</button>
+                    <button class="btn-delete-wh" data-record-id="${record.id}" data-source="${record.source}">删除</button>
+                `;
+            } else {
+                actionButtons = `<span class="readonly-tag" title="${sourceTitle}">只读</span>`;
+            }
+            
             html += `
-                <tr class="${expired ? 'expired' : ''}">
+                <tr class="${expired ? 'expired' : ''} ${record.source}">
                     <td>${record.fromSystem}↔${record.toSystem}</td>
-                    <td>${record.type}</td>
                     <td>${record.size}</td>
-                    <td>${recordTime}</td>
-                    <td class="remaining-time">${remaining}</td>
                     <td class="bookmarks-cell">${bookmarksHtml}</td>
-                    <td>
-                        <button class="btn-edit-wh" data-index="${index}">编辑</button>
-                        <button class="btn-delete-wh" data-index="${index}">删除</button>
-                    </td>
+                    <td class="remaining-time">${remaining}</td>
+                    <td>${record.type}</td>
+                    <td title="${sourceTitle}">${sourceLabel}</td>
+                    <td>${actionButtons}</td>
                 </tr>
             `;
         });
@@ -796,20 +1111,36 @@ class RegionalMapApp {
             });
         });
         
-        // 绑定删除按钮
+        // 绑定删除按钮（仅本地记录）
         container.querySelectorAll('.btn-delete-wh').forEach(btn => {
             btn.addEventListener('click', (e) => {
-                const index = parseInt(e.target.dataset.index);
-                this.wormholeRecords.splice(index, 1);
-                this.updateWormholeTable();
+                const recordId = e.target.dataset.recordId;
+                const source = e.target.dataset.source;
+                
+                if (source === 'evescout') return; // EVE Scout 记录不可删除
+                
+                // 通过 ID 查找并删除
+                const index = this.wormholeRecords.findIndex(r => r.id === recordId);
+                if (index !== -1) {
+                    this.wormholeRecords.splice(index, 1);
+                    this.updateWormholeTable();
+                }
             });
         });
         
-        // 绑定编辑按钮
+        // 绑定编辑按钮（仅本地记录）
         container.querySelectorAll('.btn-edit-wh').forEach(btn => {
             btn.addEventListener('click', (e) => {
-                const index = parseInt(e.target.dataset.index);
-                this.editWormhole(index);
+                const recordId = e.target.dataset.recordId;
+                const source = e.target.dataset.source;
+                
+                if (source === 'evescout') return; // EVE Scout 记录不可编辑
+                
+                // 通过 ID 查找
+                const index = this.wormholeRecords.findIndex(r => r.id === recordId);
+                if (index !== -1) {
+                    this.editWormhole(index);
+                }
             });
         });
     }
