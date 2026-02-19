@@ -205,8 +205,8 @@ class RegionalMapApp {
             this.populateRegionSelector();
             this.bindEvents();
             
-            // 默认选择 Metropolis
-            this.selectRegion(10000042);
+            // 默认选择耶舒尔 (Yeeshur) 所在星域并聚焦
+            this.selectRegion(10000064, 30005008, true);
             
             this.showToast('地图加载完成');
             
