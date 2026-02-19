@@ -282,6 +282,7 @@ class RegionalMapApp {
         const results = [];
         const lowerQuery = query.toLowerCase();
         
+        // 搜索 K-Space 星系
         for (const system of dataLoader.systems.values()) {
             const nameMatch = system.name.toLowerCase().includes(lowerQuery);
             const nameEnMatch = system.nameEn && system.nameEn.toLowerCase().includes(lowerQuery);
@@ -294,7 +295,25 @@ class RegionalMapApp {
                 });
             }
             
-            if (results.length >= 20) break; // 最多显示20个结果
+            if (results.length >= 20) break;
+        }
+        
+        // 搜索虫洞星系（如果还有空间）
+        if (results.length < 20) {
+            for (const system of dataLoader.wormholeSystems.values()) {
+                const nameMatch = system.name.toLowerCase().includes(lowerQuery);
+                const nameEnMatch = system.nameEn && system.nameEn.toLowerCase().includes(lowerQuery);
+                
+                if (nameMatch || nameEnMatch) {
+                    results.push({
+                        system: system,
+                        regionName: '虫洞星系',
+                        isWormhole: true
+                    });
+                }
+                
+                if (results.length >= 20) break;
+            }
         }
         
         return results;
@@ -315,19 +334,34 @@ class RegionalMapApp {
             const div = document.createElement('div');
             div.className = 'search-result-item';
             
-            const securityClass = item.system.securityClass;
-            const securityText = item.system.securityStatus.toFixed(1);
-            
-            div.innerHTML = `
-                <div class="system-name">
-                    ${this.highlightMatch(item.system.name, query)}
-                    <span class="security-badge ${securityClass}">${securityText}</span>
-                </div>
-                <div class="region-name">${item.regionName}</div>
-            `;
+            // 虫洞星系特殊显示
+            if (item.isWormhole) {
+                div.innerHTML = `
+                    <div class="system-name">
+                        ${this.highlightMatch(item.system.name, query)}
+                        <span class="security-badge wormhole">J</span>
+                    </div>
+                    <div class="region-name">虫洞星系</div>
+                `;
+            } else {
+                const securityClass = item.system.securityClass;
+                const securityText = item.system.securityStatus.toFixed(1);
+                
+                div.innerHTML = `
+                    <div class="system-name">
+                        ${this.highlightMatch(item.system.name, query)}
+                        <span class="security-badge ${securityClass}">${securityText}</span>
+                    </div>
+                    <div class="region-name">${item.regionName}</div>
+                `;
+            }
             
             div.addEventListener('click', () => {
-                this.selectSystem(item.system);
+                if (item.isWormhole) {
+                    this.selectWormholeSystem(item.system);
+                } else {
+                    this.selectSystem(item.system);
+                }
                 this.hideSearchResults();
                 this.elements.searchInput.value = '';
             });
@@ -360,6 +394,70 @@ class RegionalMapApp {
         // 跳转到星系所在星域并居中显示
         this.selectRegion(system.regionID, system.id, true);
         this.showToast(`已定位到: ${system.name}`);
+    }
+    
+    selectWormholeSystem(system) {
+        // 切换到虫洞星域视图
+        this.currentRegionId = `wormhole-${system.id}`;
+        this.elements.regionSelect.value = '';
+        
+        // 获取虫洞星域数据
+        let data = dataLoader.getWormholeRegionData(system.id);
+        if (!data) {
+            this.showToast('无法加载虫洞星系数据', 'error');
+            return;
+        }
+        
+        // 获取与该虫洞连接的 K-Space 星系（从路径记录中）
+        const connectedKSpace = this.getConnectedKSpaceSystems(system.id);
+        
+        if (connectedKSpace.length > 0) {
+            // 构建外部连接
+            const { externalSystems, externalConnections } = dataLoader.buildWormholeExternalConnections(
+                system.id,
+                connectedKSpace
+            );
+            data.externalSystems = externalSystems;
+            data.externalConnections = externalConnections;
+        }
+        
+        // 设置数据并渲染（使用 fitToBounds 计算合适的缩放）
+        this.renderer.setData(data, false); // false = 使用 fitToBounds
+        this.renderer.setSelectedSystem(data.systems[0]);
+        
+        // 居中显示（不传 zoomLevel，使用 fitToBounds 计算出的 zoom）
+        this.renderer.centerOnSystem(data.systems[0]);
+        
+        this.showToast(`已定位到虫洞星系: ${system.name}`);
+        this.updateSystemInfo(data.systems[0]);
+    }
+    
+    getConnectedKSpaceSystems(wormholeId) {
+        // 从路径记录中获取与虫洞连接的 K-Space 星系
+        const connections = this.pathRecorder.getDisplayConnections();
+        const connected = [];
+        
+        for (const conn of connections) {
+            if (conn.from.id === wormholeId && conn.to.id < 31000000) {
+                const kspaceSystem = dataLoader.systems.get(conn.to.id);
+                if (kspaceSystem) {
+                    connected.push({
+                        system: kspaceSystem,
+                        signal: '未知' // 可以从虫洞记录中获取
+                    });
+                }
+            } else if (conn.to.id === wormholeId && conn.from.id < 31000000) {
+                const kspaceSystem = dataLoader.systems.get(conn.from.id);
+                if (kspaceSystem) {
+                    connected.push({
+                        system: kspaceSystem,
+                        signal: '未知'
+                    });
+                }
+            }
+        }
+        
+        return connected;
     }
     
     populateRegionSelector() {
@@ -436,6 +534,17 @@ class RegionalMapApp {
     onSystemSelect(system) {
         if (!system) {
             this.updateSystemInfo(null);
+            return;
+        }
+        
+        // 如果点击的是虫洞星系，切换到虫洞视图
+        if (system.isWormhole || system.id >= 31000000) {
+            this.selectWormholeSystem(system);
+            // 记录到路径
+            this.pathRecorder.addSystem(system);
+            this.updatePathPanel();
+            this.renderer.setPathData(this.pathRecorder.getDisplayPath(), this.pathRecorder.getDisplayConnections());
+            this.detectWormholes();
             return;
         }
         
@@ -847,6 +956,15 @@ class RegionalMapApp {
     }
     
     focusOnSystem(regionId, systemId) {
+        // 检测是否是虫洞星系
+        if (systemId >= 31000000) {
+            const wormholeSystem = dataLoader.wormholeSystems.get(systemId);
+            if (wormholeSystem) {
+                this.selectWormholeSystem(wormholeSystem);
+            }
+            return;
+        }
+        
         // 如果不在当前星域，先切换星域
         if (this.currentRegionId !== regionId) {
             this.selectRegion(regionId, systemId, true);

@@ -5,6 +5,7 @@
 class DataLoader {
     constructor() {
         this.systems = new Map();
+        this.wormholeSystems = new Map(); // 虫洞星系 (J-space)
         this.regions = new Map();
         this.constellations = new Map();
         this.connections = new Map();
@@ -96,8 +97,6 @@ class DataLoader {
         for (const [idStr, raw] of Object.entries(systemsData)) {
             const id = parseInt(idStr);
             
-            if (id >= 31000000) continue; // 跳过虫洞
-
             // 使用 SDE 中的原始 position2D 坐标
             const pos2D = raw.position2D || { x: 0, y: 0 };
             
@@ -118,16 +117,24 @@ class DataLoader {
                 isHub: raw.hub || false,
                 isRegional: raw.regional || false,
                 isInternational: raw.international || false,
-                borderConnections: []
+                borderConnections: [],
+                isWormhole: id >= 31000000 // 标记虫洞星系
             };
 
-            this.systems.set(id, system);
-
-            const region = this.regions.get(system.regionID);
-            if (region) {
-                region.systems.push(id);
+            if (id >= 31000000) {
+                // 虫洞星系单独存储
+                this.wormholeSystems.set(id, system);
+            } else {
+                // K-Space 星系
+                this.systems.set(id, system);
+                const region = this.regions.get(system.regionID);
+                if (region) {
+                    region.systems.push(id);
+                }
             }
         }
+        
+        console.log(`[DataLoader] 加载了 ${this.wormholeSystems.size} 个虫洞星系`);
     }
 
     getSecurityClass(securityStatus) {
@@ -475,14 +482,173 @@ class DataLoader {
             minY = Math.min(minY, y);
             maxY = Math.max(maxY, y);
         }
+        
+        let width = maxX - minX;
+        let height = maxY - minY;
+        
+        // 如果只有一个系统（width/height 为 0），设置默认大小
+        // 使用 SDE 坐标系中的合理范围（约 1e16 量级）
+        if (width === 0) {
+            width = 1e16;
+            minX = minX - width / 2;
+            maxX = maxX + width / 2;
+        }
+        if (height === 0) {
+            height = 1e16;
+            minY = minY - height / 2;
+            maxY = maxY + height / 2;
+        }
 
         return {
             minX, maxX, minY, maxY,
-            width: maxX - minX,
-            height: maxY - minY,
+            width,
+            height,
             centerX: (minX + maxX) / 2,
             centerY: (minY + maxY) / 2
         };
+    }
+    
+    /**
+     * 获取虫洞星域数据 - 只显示目标虫洞星系 + 连接的 K-Space 入口星系
+     * @param {number} targetSystemId - 目标虫洞星系 ID
+     * @returns {Object} 虫洞星域数据
+     */
+    getWormholeRegionData(targetSystemId) {
+        const wormholeSystem = this.wormholeSystems.get(targetSystemId);
+        if (!wormholeSystem) return null;
+        
+        // 创建虚拟的虫洞星域
+        const region = {
+            id: `wormhole-${targetSystemId}`,
+            name: `${wormholeSystem.name} (虫洞)`,
+            nameEn: wormholeSystem.nameEn,
+            isWormholeRegion: true,
+            systems: [targetSystemId]
+        };
+        
+        // 虫洞星系作为主系统
+        const mainSystem = {
+            ...wormholeSystem,
+            isBorder: true // 标记为边界星系，用于显示连接
+        };
+        
+        // 收集所有连接到该虫洞的 K-Space 星系（通过路径记录）
+        // 这里先返回基础数据，外部星系由调用者提供
+        const systems = [mainSystem];
+        
+        const bounds = this.calculateBounds(systems);
+        
+        return {
+            region,
+            systems,
+            borderSystems: [mainSystem],
+            externalSystems: [], // 由调用者填充
+            bounds,
+            internalConnections: [],
+            externalConnections: []
+        };
+    }
+    
+    /**
+     * 为虫洞星系构建外部连接（K-Space 入口）
+     * @param {number} wormholeId - 虫洞星系 ID
+     * @param {Array} connectedKSpaceSystems - 连接的 K-Space 星系列表 [{system, signal}]
+     * @returns {Object} 包含外部星系和连接的数据
+     */
+    buildWormholeExternalConnections(wormholeId, connectedKSpaceSystems) {
+        const wormholeSystem = this.wormholeSystems.get(wormholeId);
+        if (!wormholeSystem) return null;
+        
+        const externalSystems = [];
+        const externalConnections = [];
+        
+        // 计算虚拟位置：围绕虫洞星系均匀分布
+        const centerX = wormholeSystem.position2D.x;
+        const centerY = wormholeSystem.position2D.y;
+        const radius = 5e15; // 虚拟半径，约 5e15 单位
+        
+        const count = connectedKSpaceSystems.length;
+        
+        for (let i = 0; i < count; i++) {
+            const { system, signal } = connectedKSpaceSystems[i];
+            const angle = (i * 2 * Math.PI) / count - Math.PI / 2; // 从上方开始
+            
+            const virtualPos = {
+                x: centerX + Math.cos(angle) * radius,
+                y: centerY + Math.sin(angle) * radius
+            };
+            
+            const externalSystem = {
+                ...system,
+                isExternal: true,
+                connectedFrom: wormholeId,
+                connectedFromName: wormholeSystem.name,
+                position2D: virtualPos,
+                uniqueKey: `wormhole-${wormholeId}-${system.id}`,
+                wormholeSignal: signal // 虫洞信号编号
+            };
+            
+            externalSystems.push(externalSystem);
+            
+            externalConnections.push({
+                from: wormholeId,
+                to: system.id,
+                fromPos: wormholeSystem.position2D,
+                toPos: virtualPos,
+                targetRegion: system.regionID,
+                targetRegionName: this.getRegionName(system.regionID),
+                targetSystem: system.name,
+                targetSystemObj: system,
+                isWormholeConnection: true,
+                signal: signal
+            });
+        }
+        
+        return { externalSystems, externalConnections };
+    }
+    
+    /**
+     * 搜索星系（包括虫洞星系）
+     * @param {string} query - 搜索关键词
+     * @param {number} limit - 最大结果数
+     * @returns {Array} 匹配的星系列表
+     */
+    searchAllSystems(query, limit = 20) {
+        const results = [];
+        const lowerQuery = query.toLowerCase();
+        
+        // 搜索 K-Space 星系
+        for (const system of this.systems.values()) {
+            if (results.length >= limit) break;
+            
+            const nameMatch = system.name.toLowerCase().includes(lowerQuery);
+            const nameEnMatch = system.nameEn && system.nameEn.toLowerCase().includes(lowerQuery);
+            
+            if (nameMatch || nameEnMatch) {
+                results.push({
+                    ...system,
+                    searchMatch: system.name
+                });
+            }
+        }
+        
+        // 搜索虫洞星系（JXXXXXX 格式）
+        for (const system of this.wormholeSystems.values()) {
+            if (results.length >= limit) break;
+            
+            const nameMatch = system.name.toLowerCase().includes(lowerQuery);
+            const nameEnMatch = system.nameEn && system.nameEn.toLowerCase().includes(lowerQuery);
+            
+            if (nameMatch || nameEnMatch) {
+                results.push({
+                    ...system,
+                    searchMatch: system.name,
+                    isWormhole: true
+                });
+            }
+        }
+        
+        return results;
     }
 }
 

@@ -10,7 +10,7 @@ class MapRenderer {
         this.viewport = {
             x: 0,
             y: 0,
-            zoom: 1,
+            zoom: 1e-14,  // 使用合理的默认值（SDE 坐标系需要很小的缩放）
             width: 0,
             height: 0
         };
@@ -99,6 +99,9 @@ class MapRenderer {
         
         if (data && data.bounds && !skipFit) {
             this.fitToBounds(data.bounds);
+        } else {
+            // 即使 skipFit，也要确保 zoom 在合理范围
+            this.clampZoom();
         }
         
         this.render();
@@ -109,10 +112,30 @@ class MapRenderer {
         const availableWidth = this.viewport.width - padding * 2;
         const availableHeight = this.viewport.height - padding * 2;
         
+        // 防止除零或非法值
+        if (!bounds || bounds.width === 0 || bounds.height === 0 || 
+            !isFinite(bounds.width) || !isFinite(bounds.height)) {
+            console.warn('[MapRenderer] Invalid bounds, using default zoom');
+            // 使用安全的默认值
+            this.viewport.zoom = 1e-14;
+            this.viewport.x = this.viewport.width / 2;
+            this.viewport.y = this.viewport.height / 2;
+            this.clampZoom();
+            return;
+        }
+        
         // 根据坐标范围自动计算缩放（SDE position2D 坐标值很大，需要很小的缩放因子）
         const scaleX = availableWidth / bounds.width;
         const scaleY = availableHeight / bounds.height;
-        this.viewport.zoom = Math.min(scaleX, scaleY) * 0.9;
+        let zoom = Math.min(scaleX, scaleY) * 0.9;
+        
+        // 确保 zoom 合法
+        if (!isFinite(zoom) || zoom <= 0) {
+            zoom = 1e-14;
+        }
+        
+        this.viewport.zoom = zoom;
+        this.clampZoom();
         
         this.viewport.x = this.viewport.width / 2 - bounds.centerX * this.viewport.zoom;
         this.viewport.y = this.viewport.height / 2 + bounds.centerY * this.viewport.zoom;  // +Y 因为 Y 轴已翻转
@@ -121,9 +144,14 @@ class MapRenderer {
     worldToScreen(worldPos) {
         // SDE position2D: +Y 是北（上）
         // Canvas: +Y 是下，所以需要翻转 Y 轴
+        // 确保 zoom 合法
+        let zoom = this.viewport.zoom;
+        if (!isFinite(zoom) || zoom <= 0) {
+            zoom = 1e-14;
+        }
         return {
-            x: worldPos.x * this.viewport.zoom + this.viewport.x,
-            y: -worldPos.y * this.viewport.zoom + this.viewport.y
+            x: worldPos.x * zoom + this.viewport.x,
+            y: -worldPos.y * zoom + this.viewport.y
         };
     }
     
@@ -134,18 +162,42 @@ class MapRenderer {
         
         const bounds = this.currentData.bounds;
         const domainSize = Math.max(bounds.width, bounds.height);
+        
+        // 防止除零或非法值
+        if (!isFinite(domainSize) || domainSize === 0) return baseSize;
+        
         const viewportSize = Math.min(this.viewport.width, this.viewport.height);
+        if (!isFinite(viewportSize) || viewportSize === 0) return baseSize;
+        
         const referenceZoom = (viewportSize / domainSize) * 0.9;
         
+        // 防止除零或非法值
+        if (!isFinite(referenceZoom) || referenceZoom === 0) return baseSize;
+        
+        // 确保 viewport.zoom 合法
+        let currentZoom = this.viewport.zoom;
+        if (!isFinite(currentZoom) || currentZoom <= 0) {
+            currentZoom = referenceZoom;
+        }
+        
         // 当前 zoom 相对于参考 zoom 的比例
-        const scale = this.viewport.zoom / referenceZoom;
-        return baseSize * scale;
+        const scale = currentZoom / referenceZoom;
+        
+        // 限制 scale 在合理范围（对应 90% ~ 900%）
+        const clampedScale = Math.max(0.9, Math.min(9.0, scale));
+        
+        return baseSize * clampedScale;
     }
     
     screenToWorld(screenPos) {
+        // 确保 zoom 合法，防止除零
+        let zoom = this.viewport.zoom;
+        if (!isFinite(zoom) || zoom === 0) {
+            zoom = 1e-14;
+        }
         return {
-            x: (screenPos.x - this.viewport.x) / this.viewport.zoom,
-            y: -(screenPos.y - this.viewport.y) / this.viewport.zoom
+            x: (screenPos.x - this.viewport.x) / zoom,
+            y: -(screenPos.y - this.viewport.y) / zoom
         };
     }
     
@@ -183,6 +235,19 @@ class MapRenderer {
             for (const s of this.currentData.externalSystems || []) allSystems.set(s.id, s);
         }
         
+        // 检查当前显示的星系中是否有任何一个在路径上
+        // 如果没有，则不显示路径
+        let hasPathSystemInView = false;
+        for (const pathSys of this.pathSystems) {
+            if (allSystems.has(pathSys.id)) {
+                hasPathSystemInView = true;
+                break;
+            }
+        }
+        
+        // 如果当前视图中没有路径星系，不绘制路径
+        if (!hasPathSystemInView) return;
+        
         // 计算不在当前星域的路径星系的虚拟位置（带防重叠）
         const externalPathPositions = this.calculateExternalPositions(allSystems);
         
@@ -197,7 +262,8 @@ class MapRenderer {
                 pathSystemPositions.set(pathSys.id, externalPathPositions.get(pathSys.id));
             } else {
                 // 从 dataLoader 获取并使用原始位置（备用）
-                const fullSystem = dataLoader.systems.get(pathSys.id);
+                const fullSystem = dataLoader.systems.get(pathSys.id) || 
+                                   dataLoader.wormholeSystems.get(pathSys.id);
                 if (fullSystem) {
                     pathSystemPositions.set(pathSys.id, fullSystem.position2D);
                 }
@@ -211,7 +277,8 @@ class MapRenderer {
         for (const [id, pos2D] of pathSystemPositions) {
             if (!allSystems.has(id)) {
                 const pos = this.worldToScreen(pos2D);
-                const system = dataLoader.systems.get(id);
+                const system = dataLoader.systems.get(id) || 
+                               dataLoader.wormholeSystems.get(id);
                 
                 // 背景清除
                 ctx.fillStyle = '#0a0808';
@@ -628,7 +695,13 @@ class MapRenderer {
         const { node, border } = this.styles;
         const radius = node.radius;
         
-        const color = node.colors[system.securityClass] || node.colors.null;
+        // 虫洞星系使用特殊颜色
+        let color;
+        if (system.isWormhole || system.id >= 31000000) {
+            color = node.colors.wormhole;
+        } else {
+            color = node.colors[system.securityClass] || node.colors.null;
+        }
         
         // 入口星系发光效果
         if (system.isBorder) {
@@ -744,9 +817,26 @@ class MapRenderer {
         const bounds = this.currentData.bounds;
         const domainSize = Math.max(bounds.width, bounds.height);
         const viewportSize = Math.min(viewport.width, viewport.height);
+        
+        // 防止非法值
+        if (!isFinite(domainSize) || domainSize === 0 || !isFinite(viewportSize) || viewportSize === 0) return;
+        
         const referenceZoom = (viewportSize / domainSize) * 0.9;
-        const scale = this.viewport.zoom / referenceZoom;
-        const percentage = Math.round(scale * 100);
+        
+        // 防止除零
+        if (!isFinite(referenceZoom) || referenceZoom === 0) return;
+        
+        let currentZoom = this.viewport.zoom;
+        if (!isFinite(currentZoom) || currentZoom <= 0) {
+            currentZoom = referenceZoom;
+        }
+        
+        const scale = currentZoom / referenceZoom;
+        
+        // 限制显示范围并防止 NaN
+        let percentage = Math.round(scale * 100);
+        if (!isFinite(percentage)) percentage = 90;
+        percentage = Math.max(90, Math.min(900, percentage));
         
         // 左下角位置
         const padding = 10;
@@ -825,22 +915,35 @@ class MapRenderer {
     zoom(factor, centerX, centerY) {
         const oldZoom = this.viewport.zoom;
         
+        // 确保 oldZoom 合法
+        if (!isFinite(oldZoom) || oldZoom <= 0) {
+            this.clampZoom();
+            return;
+        }
+        
         // 计算参考 zoom（fitToBounds 时的 zoom）
-        let minZoom = oldZoom * 0.1;
-        let maxZoom = oldZoom * 10;
+        let minZoom = 1e-15;
+        let maxZoom = 1e-13;
         if (this.currentData && this.currentData.bounds) {
             const bounds = this.currentData.bounds;
             const domainSize = Math.max(bounds.width, bounds.height);
             const viewportSize = Math.min(this.viewport.width, this.viewport.height);
-            const referenceZoom = (viewportSize / domainSize) * 0.9;
-            // 限制：90% ~ 900%
-            minZoom = referenceZoom * 0.9;
-            maxZoom = referenceZoom * 9.0;
+            if (domainSize > 0 && viewportSize > 0) {
+                const referenceZoom = (viewportSize / domainSize) * 0.9;
+                // 限制：90% ~ 900%
+                minZoom = referenceZoom * 0.9;
+                maxZoom = referenceZoom * 9.0;
+            }
         }
         
         const newZoom = Math.max(minZoom, Math.min(maxZoom, oldZoom * factor));
         
-        const zoomFactor = newZoom / oldZoom;
+        // 确保 zoomFactor 合法
+        let zoomFactor = newZoom / oldZoom;
+        if (!isFinite(zoomFactor) || zoomFactor <= 0) {
+            zoomFactor = 1;
+        }
+        
         this.viewport.x = centerX - (centerX - this.viewport.x) * zoomFactor;
         this.viewport.y = centerY - (centerY - this.viewport.y) * zoomFactor;
         this.viewport.zoom = newZoom;
@@ -858,11 +961,30 @@ class MapRenderer {
     centerOnSystem(system, zoomLevel = null) {
         if (!system) return;
         
-        // 如果没有指定缩放级别，使用当前缩放或默认缩放
-        if (zoomLevel === null) {
-            zoomLevel = this.viewport.zoom || 1e-15;
+        // 计算参考 zoom（fitToBounds 时的 zoom）
+        let referenceZoom = 1e-14;
+        if (this.currentData && this.currentData.bounds) {
+            const bounds = this.currentData.bounds;
+            const domainSize = Math.max(bounds.width, bounds.height);
+            const viewportSize = Math.min(this.viewport.width, this.viewport.height);
+            if (domainSize > 0 && viewportSize > 0) {
+                referenceZoom = (viewportSize / domainSize) * 0.9;
+            }
         }
-        this.viewport.zoom = zoomLevel;
+        
+        // 如果没有指定缩放级别，使用当前缩放或参考缩放
+        let zoom = zoomLevel;
+        if (zoom === null || !isFinite(zoom) || zoom <= 0) {
+            zoom = this.viewport.zoom;
+        }
+        if (!isFinite(zoom) || zoom <= 0) {
+            zoom = referenceZoom;
+        }
+        
+        // 限制 zoom 范围：90% ~ 900%
+        const minZoom = referenceZoom * 0.9;
+        const maxZoom = referenceZoom * 9.0;
+        this.viewport.zoom = Math.max(minZoom, Math.min(maxZoom, zoom));
         
         // 计算目标位置，使星系居中
         const targetX = system.position2D.x * this.viewport.zoom;
@@ -872,5 +994,31 @@ class MapRenderer {
         this.viewport.y = this.viewport.height / 2 + targetY;  // +Y 因为 Y 轴已翻转
         
         this.render();
+    }
+    
+    /**
+     * 限制 zoom 在合理范围内（90% ~ 900%）
+     */
+    clampZoom() {
+        if (!this.currentData || !this.currentData.bounds) return;
+        
+        const bounds = this.currentData.bounds;
+        const domainSize = Math.max(bounds.width, bounds.height);
+        const viewportSize = Math.min(this.viewport.width, this.viewport.height);
+        
+        if (domainSize <= 0 || viewportSize <= 0) return;
+        
+        const referenceZoom = (viewportSize / domainSize) * 0.9;
+        
+        // 限制范围：90% ~ 900%
+        const minZoom = referenceZoom * 0.9;
+        const maxZoom = referenceZoom * 9.0;
+        
+        // 确保 zoom 合法
+        if (!isFinite(this.viewport.zoom) || this.viewport.zoom <= 0) {
+            this.viewport.zoom = referenceZoom;
+        } else {
+            this.viewport.zoom = Math.max(minZoom, Math.min(maxZoom, this.viewport.zoom));
+        }
     }
 }

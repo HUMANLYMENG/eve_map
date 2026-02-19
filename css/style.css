@@ -208,6 +208,11 @@ body {
     color: var(--accent-red);
 }
 
+.search-result-item .security-badge.wormhole {
+    background: rgba(154, 90, 199, 0.2);
+    color: #c78fc7;
+}
+
 .search-no-results {
     padding: 12px;
     text-align: center;
