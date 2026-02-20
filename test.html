@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EVE Regional Map - 重构测试版</title>
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        .version-badge {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            padding: 5px 12px;
+            background: rgba(90, 143, 199, 0.3);
+            border: 1px solid var(--accent-blue);
+            border-radius: 4px;
+            font-size: 12px;
+            color: var(--accent-blue);
+            z-index: 1000;
+        }
+        .test-panel {
+            position: fixed;
+            top: 40px;
+            right: 10px;
+            padding: 10px;
+            background: var(--bg-panel);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            z-index: 1000;
+            font-size: 12px;
+        }
+        .test-panel button {
+            display: block;
+            width: 100%;
+            margin: 4px 0;
+            padding: 6px 12px;
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 3px;
+            color: var(--text-primary);
+            cursor: pointer;
+            font-size: 11px;
+        }
+        .test-panel button:hover {
+            border-color: var(--accent-blue);
+        }
+        .test-panel button.success {
+            background: rgba(90, 199, 90, 0.2);
+            border-color: var(--accent-green);
+        }
+        .test-panel button.error {
+            background: rgba(199, 90, 90, 0.2);
+            border-color: var(--accent-red);
+        }
+        .test-log {
+            position: fixed;
+            bottom: 10px;
+            right: 10px;
+            width: 300px;
+            max-height: 200px;
+            overflow-y: auto;
+            padding: 10px;
+            background: var(--bg-panel);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            font-size: 11px;
+            font-family: monospace;
+            z-index: 1000;
+        }
+        .test-log .entry {
+            margin: 2px 0;
+            padding: 2px 4px;
+            border-radius: 2px;
+        }
+        .test-log .entry.success { background: rgba(90, 199, 90, 0.1); }
+        .test-log .entry.error { background: rgba(199, 90, 90, 0.1); }
+        .test-log .entry.info { color: var(--text-secondary); }
+    </style>
+</head>
+<body>
+    <div class="version-badge">重构测试版 (ES6 Modules)</div>
+    
+    <div class="test-panel">
+        <strong>测试面板</strong>
+        <button onclick="runTests()">运行单元测试</button>
+        <button onclick="testCoreModules()">测试核心模块</button>
+        <button onclick="testDataModules()">测试数据模块</button>
+        <button onclick="testFeatureModules()">测试功能模块</button>
+        <button onclick="clearLog()">清空日志</button>
+        <hr style="margin: 8px 0; border-color: var(--border-color);">
+        <button onclick="location.href='index.html'">返回原版</button>
+    </div>
+    
+    <div class="test-log" id="testLog">
+        <div class="entry info">等待测试...</div>
+    </div>
+
+    <div id="app">
+        <!-- 顶部标题栏 -->
+        <header class="header">
+            <div class="header-left">
+                <div class="logo">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"/>
+                        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+                        <path d="M2 12h20"/>
+                    </svg>
+                </div>
+                <div class="title-group">
+                    <h1>EVE Regional Map</h1>
+                    <span class="subtitle">星域导航 - 重构版</span>
+                </div>
+            </div>
+            
+            <div class="region-selector">
+                <select id="regionSelect">
+                    <option value="">选择星域...</option>
+                </select>
+            </div>
+
+            <div class="system-search">
+                <input type="text" id="searchInput" placeholder="搜索星系..." autocomplete="off">
+                <div id="searchResults" class="search-results"></div>
+            </div>
+
+            <div class="legend">
+                <div class="legend-item">
+                    <span class="dot high-sec"></span>
+                    <span>高安 (≥0.5)</span>
+                </div>
+                <div class="legend-item">
+                    <span class="dot low-sec"></span>
+                    <span>低安 (0.1-0.4)</span>
+                </div>
+                <div class="legend-item">
+                    <span class="dot null-sec"></span>
+                    <span>00区 (&lt;0.1)</span>
+                </div>
+                <div class="legend-item">
+                    <span class="dot border"></span>
+                    <span>入口星系</span>
+                </div>
+            </div>
+        </header>
+
+        <main class="main-content">
+            <div id="mapContainer" class="map-container">
+                <canvas id="mapCanvas"></canvas>
+                <div id="loadingMask" class="loading-mask">
+                    <div class="spinner"></div>
+                    <p>加载星图数据...</p>
+                </div>
+                <div id="toast" class="toast"></div>
+            </div>
+
+            <div class="resizer" id="panelResizer"></div>
+
+            <aside class="side-panel" id="sidePanel">
+                <div class="panel-section" id="systemInfo">
+                    <h3>星系信息</h3>
+                    <div class="info-content">
+                        <p class="placeholder">悬停或点击星系查看详情</p>
+                    </div>
+                </div>
+
+                <div class="panel-section" id="wormholePanel">
+                    <h3>虫洞记录</h3>
+                    <div class="wormhole-table">
+                        <p class="placeholder">暂无虫洞记录</p>
+                    </div>
+                </div>
+
+                <div class="panel-section" id="pathPanel">
+                    <h3>路径记录 <span class="path-count">(显示最近6个)</span></h3>
+                    <div class="path-list">
+                        <p class="placeholder">点击星系记录路径</p>
+                    </div>
+                    <button class="clear-path-btn" onclick="window.app?.clearPath()">清除路径</button>
+                </div>
+
+                <div class="panel-section controls-help">
+                    <h3>操作说明</h3>
+                    <ul>
+                        <li>🖱️ 左键拖动 - 平移地图</li>
+                        <li>🔍 滚轮 - 缩放</li>
+                        <li>👆 单击 - 选中星系</li>
+                        <li>🏠 双击 - 重置视图</li>
+                    </ul>
+                </div>
+            </aside>
+        </main>
+    </div>
+
+    <!-- js-yaml 库 -->
+    <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
+    
+    <!-- EVE Scout 服务 (全局，供 app.js 使用) -->
+    <script src="js/eveScoutService.js"></script>
+    
+    <!-- 测试日志工具 -->
+    <script>
+        function log(message, type = 'info') {
+            const logEl = document.getElementById('testLog');
+            const entry = document.createElement('div');
+            entry.className = `entry ${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logEl.appendChild(entry);
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+        
+        function clearLog() {
+            document.getElementById('testLog').innerHTML = '<div class="entry info">日志已清空</div>';
+        }
+        
+        function runTests() {
+            log('开始运行测试...', 'info');
+            testCoreModules();
+            testDataModules();
+            testFeatureModules();
+            log('所有测试完成!', 'success');
+        }
+    </script>
+
+    <!-- 主应用模块 -->
+    <script type="module">
+        import { 
+            WORMHOLE_TYPES, getSecurityClass, debounce, EventBus, Events 
+        } from './js/core/index.js';
+        
+        import { 
+            DataLoader, SystemsManager, RegionsManager, ConnectionsManager 
+        } from './js/data/index.js';
+        
+        import { 
+            WormholeRecord, WormholeManager, PathRecorder, PathManager, SearchManager 
+        } from './js/features/index.js';
+        
+        import { MapRenderer, Viewport } from './js/renderer/index.js';
+        import { RegionalMapApp } from './js/app.js';
+
+        // 暴露到全局供测试使用
+        window.TEST_MODULES = {
+            core: { WORMHOLE_TYPES, getSecurityClass, debounce, EventBus, Events },
+            data: { DataLoader, SystemsManager, RegionsManager, ConnectionsManager },
+            features: { WormholeRecord, WormholeManager, PathRecorder, PathManager, SearchManager },
+            renderer: { MapRenderer, Viewport }
+        };
+
+        // 启动应用
+        window.app = new RegionalMapApp();
+        window.app.init().catch(err => {
+            console.error('应用启动失败:', err);
+            log('应用启动失败: ' + err.message, 'error');
+        });
+        
+        log('ES6 模块加载成功', 'success');
+    </script>
+
+    <!-- 测试脚本 -->
+    <script type="module">
+        import { getSecurityClass, debounce, EventBus } from './js/core/index.js';
+        import { WormholeRecord, PathRecorder } from './js/features/index.js';
+        
+        window.testCoreModules = function() {
+            log('=== 测试核心模块 ===', 'info');
+            
+            try {
+                // 测试安全等级分类
+                const high = getSecurityClass(0.7);
+                const low = getSecurityClass(0.3);
+                const nullSec = getSecurityClass(-0.2);
+                
+                if (high === 'high' && low === 'low' && nullSec === 'null') {
+                    log('✓ getSecurityClass 测试通过', 'success');
+                } else {
+                    log('✗ getSecurityClass 测试失败', 'error');
+                }
+                
+                // 测试防抖函数
+                let count = 0;
+                const debouncedFn = debounce(() => count++, 50);
+                debouncedFn();
+                debouncedFn();
+                debouncedFn();
+                
+                setTimeout(() => {
+                    if (count === 1) {
+                        log('✓ debounce 测试通过', 'success');
+                    } else {
+                        log('✗ debounce 测试失败: count=' + count, 'error');
+                    }
+                }, 100);
+                
+                // 测试事件总线
+                const bus = new EventBus();
+                let eventReceived = false;
+                bus.on('test', () => { eventReceived = true; });
+                bus.emit('test');
+                
+                if (eventReceived) {
+                    log('✓ EventBus 测试通过', 'success');
+                } else {
+                    log('✗ EventBus 测试失败', 'error');
+                }
+                
+            } catch (error) {
+                log('核心模块测试错误: ' + error.message, 'error');
+            }
+        };
+        
+        window.testFeatureModules = function() {
+            log('=== 测试功能模块 ===', 'info');
+            
+            try {
+                // 测试虫洞记录
+                const record = new WormholeRecord({
+                    fromSystem: 'A',
+                    toSystem: 'B',
+                    type: 'K162',
+                    size: 'L',
+                    maxLife: '1d',
+                    source: 'local'
+                });
+                
+                if (record.fromSystem === 'A' && record.type === 'K162') {
+                    log('✓ WormholeRecord 测试通过', 'success');
+                } else {
+                    log('✗ WormholeRecord 测试失败', 'error');
+                }
+                
+                // 测试路径记录器
+                const recorder = new PathRecorder();
+                recorder.addSystem({ id: 1, name: 'Test', regionID: 100 });
+                recorder.addSystem({ id: 2, name: 'Test2', regionID: 100 });
+                
+                if (recorder.getDisplayPath().length === 2 && 
+                    recorder.getDisplayConnections().length === 1) {
+                    log('✓ PathRecorder 测试通过', 'success');
+                } else {
+                    log('✗ PathRecorder 测试失败', 'error');
+                }
+                
+            } catch (error) {
+                log('功能模块测试错误: ' + error.message, 'error');
+            }
+        };
+        
+        window.testDataModules = async function() {
+            log('=== 测试数据模块 ===', 'info');
+            
+            try {
+                const systems = new window.TEST_MODULES.data.SystemsManager();
+                
+                // 测试数据处理
+                systems.process({
+                    30000001: {
+                        name: { zh: '测试星系' },
+                        regionID: 10000001,
+                        securityStatus: 0.5,
+                        position2D: { x: 1e16, y: 2e16 }
+                    }
+                });
+                
+                if (systems.get(30000001)?.name === '测试星系') {
+                    log('✓ SystemsManager 测试通过', 'success');
+                } else {
+                    log('✗ SystemsManager 测试失败', 'error');
+                }
+                
+            } catch (error) {
+                log('数据模块测试错误: ' + error.message, 'error');
+            }
+        };
+    </script>
+</body>
+</html>

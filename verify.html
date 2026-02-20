@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>模块验证</title>
+    <style>
+        body { font-family: monospace; padding: 20px; background: #1a1a1a; color: #0f0; }
+        .success { color: #0f0; }
+        .error { color: #f00; }
+        .info { color: #ff0; }
+        pre { background: #000; padding: 10px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <h1>模块加载验证</h1>
+    <div id="output"></div>
+    
+    <script>
+        const output = document.getElementById('output');
+        
+        function log(msg, type = 'info') {
+            const div = document.createElement('div');
+            div.className = type;
+            div.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            output.appendChild(div);
+        }
+        
+        async function verify() {
+            log('开始验证模块...', 'info');
+            
+            // 测试核心模块
+            try {
+                const core = await import('./js/core/index.js');
+                log('✓ core/index.js 加载成功', 'success');
+                log('  - WORMHOLE_TYPES: ' + core.WORMHOLE_TYPES?.length + ' 项');
+                log('  - getSecurityClass: ' + (typeof core.getSecurityClass === 'function' ? '可用' : '缺失'));
+                log('  - EventBus: ' + (typeof core.EventBus === 'function' ? '可用' : '缺失'));
+            } catch (e) {
+                log('✗ core/index.js 加载失败: ' + e.message, 'error');
+            }
+            
+            // 测试功能模块
+            try {
+                const features = await import('./js/features/index.js');
+                log('✓ features/index.js 加载成功', 'success');
+                log('  - WormholeRecord: ' + (typeof features.WormholeRecord === 'function' ? '可用' : '缺失'));
+                log('  - PathRecorder: ' + (typeof features.PathRecorder === 'function' ? '可用' : '缺失'));
+            } catch (e) {
+                log('✗ features/index.js 加载失败: ' + e.message, 'error');
+            }
+            
+            // 测试数据模块
+            try {
+                const data = await import('./js/data/index.js');
+                log('✓ data/index.js 加载成功', 'success');
+                log('  - DataLoader: ' + (typeof data.DataLoader === 'function' ? '可用' : '缺失'));
+                log('  - SystemsManager: ' + (typeof data.SystemsManager === 'function' ? '可用' : '缺失'));
+            } catch (e) {
+                log('✗ data/index.js 加载失败: ' + e.message, 'error');
+            }
+            
+            // 测试渲染模块
+            try {
+                const renderer = await import('./js/renderer/index.js');
+                log('✓ renderer/index.js 加载成功', 'success');
+                log('  - MapRenderer: ' + (typeof renderer.MapRenderer === 'function' ? '可用' : '缺失'));
+                log('  - Viewport: ' + (typeof renderer.Viewport === 'function' ? '可用' : '缺失'));
+            } catch (e) {
+                log('✗ renderer/index.js 加载失败: ' + e.message, 'error');
+            }
+            
+            // 测试交互模块
+            try {
+                const interaction = await import('./js/interaction/index.js');
+                log('✓ interaction/index.js 加载成功', 'success');
+                log('  - MapInteraction: ' + (typeof interaction.MapInteraction === 'function' ? '可用' : '缺失'));
+            } catch (e) {
+                log('✗ interaction/index.js 加载失败: ' + e.message, 'error');
+            }
+            
+            // 测试 UI 模块
+            try {
+                const ui = await import('./js/ui/toast.js');
+                log('✓ ui/toast.js 加载成功', 'success');
+                log('  - Toast: ' + (typeof ui.Toast === 'function' ? '可用' : '缺失'));
+            } catch (e) {
+                log('✗ ui/toast.js 加载失败: ' + e.message, 'error');
+            }
+            
+            // 测试应用模块
+            try {
+                const app = await import('./js/app.js');
+                log('✓ app.js 加载成功', 'success');
+                log('  - RegionalMapApp: ' + (typeof app.RegionalMapApp === 'function' ? '可用' : '缺失'));
+            } catch (e) {
+                log('✗ app.js 加载失败: ' + e.message, 'error');
+            }
+            
+            log('\n验证完成！', 'info');
+        }
+        
+        verify();
+    </script>
+</body>
+</html>

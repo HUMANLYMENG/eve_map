@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EVE Regional Map - 路径调试版</title>
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        .debug-panel { position: fixed; top: 10px; right: 10px; width: 350px; max-height: 400px; overflow-y: auto;
+            background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: 4px; 
+            padding: 10px; font-size: 11px; font-family: monospace; z-index: 1000; }
+        .debug-panel h4 { margin: 0 0 10px 0; color: var(--accent-blue); }
+        .debug-entry { margin: 2px 0; padding: 2px 4px; border-radius: 2px; }
+        .debug-entry.info { color: #0f0; }
+        .debug-entry.warn { color: #ff0; }
+        .debug-entry.error { color: #f55; }
+    </style>
+</head>
+<body>
+    <div class="debug-panel" id="debugPanel">
+        <h4>🐛 调试面板</h4>
+        <div id="debugLog">等待日志...</div>
+    </div>
+
+    <div id="app">
+        <header class="header">
+            <div class="header-left">
+                <div class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/><path d="M2 12h20"/></svg></div>
+                <div class="title-group"><h1>EVE Regional Map</h1><span class="subtitle">路径调试版</span></div>
+            </div>
+            <div class="region-selector">
+                <select id="regionSelect"><option value="">选择星域...</option></select>
+            </div>
+            <div class="system-search">
+                <input type="text" id="searchInput" placeholder="搜索星系..." autocomplete="off">
+                <div id="searchResults" class="search-results"></div>
+            </div>
+        </header>
+        <main class="main-content">
+            <div id="mapContainer" class="map-container">
+                <canvas id="mapCanvas"></canvas>
+                <div id="loadingMask" class="loading-mask"><div class="spinner"></div><p>加载中...</p></div>
+                <div id="toast" class="toast"></div>
+            </div>
+            <div class="resizer" id="panelResizer"></div>
+            <aside class="side-panel" id="sidePanel">
+                <div class="panel-section" id="systemInfo"><h3>星系信息</h3><div class="info-content"><p class="placeholder">点击星系</p></div></div>
+                <div class="panel-section" id="pathPanel"><h3>路径记录</h3><div class="path-list"><p class="placeholder">点击星系记录路径</p></div><button onclick="window.app?.clearPath()">清除路径</button></div>
+            </aside>
+        </main>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
+    <script src="js/eveScoutService.js"></script>
+    
+    <script type="module">
+        import { RegionalMapApp } from './js/app.js';
+        
+        const debugLog = document.getElementById('debugLog');
+        
+        // 拦截 console.log
+        const originalLog = console.log;
+        console.log = function(...args) {
+            originalLog.apply(console, args);
+            const msg = args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' ');
+            if (msg.includes('[PathsLayer]') || msg.includes('[DEBUG]')) {
+                const entry = document.createElement('div');
+                entry.className = 'debug-entry info';
+                entry.textContent = msg;
+                debugLog.appendChild(entry);
+                debugLog.scrollTop = debugLog.scrollHeight;
+            }
+        };
+        
+        const app = new RegionalMapApp();
+        window.app = app;
+        
+        app.init().catch(err => {
+            console.error('初始化失败:', err);
+        });
+    </script>
+</body>
+</html>

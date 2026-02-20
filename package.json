@@ -1,0 +1,24 @@
+{
+  "name": "eve-regional-map",
+  "version": "1.2.0",
+  "description": "EVE Online 星域地图 - Eveeye 风格",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "lint": "eslint js/",
+    "format": "prettier --write js/"
+  },
+  "devDependencies": {
+    "vitest": "^1.0.0",
+    "jsdom": "^23.0.0",
+    "@vitest/coverage-v8": "^1.0.0",
+    "vite": "^5.0.0",
+    "eslint": "^8.0.0",
+    "prettier": "^3.0.0"
+  }
+}

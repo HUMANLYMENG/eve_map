@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>外部星系数据检查</title>
+    <style>
+        body { font-family: monospace; padding: 20px; background: #1a1a1a; color: #0f0; }
+        .section { margin: 20px 0; padding: 15px; background: #000; border-radius: 5px; }
+        .error { color: #f00; }
+        .warn { color: #ff0; }
+        .info { color: #0f0; }
+        pre { overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <h1>外部星系数据检查</h1>
+    <div id="output">加载中...</div>
+
+    <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
+    <script type="module">
+        import { DataLoader } from './js/data/index.js';
+        
+        const output = document.getElementById('output');
+        
+        async function check() {
+            const loader = new DataLoader();
+            await loader.loadAll();
+            
+            // 获取金纳泽星域数据
+            const regionData = loader.getRegionData(10000064);
+            
+            let html = '<div class="section">';
+            html += `<h3>星域: ${regionData.region.name}</h3>`;
+            html += `<p class="info">本星域星系数: ${regionData.systems.length}</p>`;
+            html += `<p class="info">外部星系数: ${regionData.externalSystems.length}</p>`;
+            html += `<p class="info">外部连接数: ${regionData.externalConnections.length}</p>`;
+            html += '</div>';
+            
+            if (regionData.externalSystems.length === 0) {
+                html += '<div class="section error"><h3>警告</h3><p>没有外部星系数据！</p></div>';
+            } else {
+                html += '<div class="section"><h3>外部星系详情</h3>';
+                regionData.externalSystems.forEach((sys, i) => {
+                    html += `<div style="margin: 10px 0; padding: 10px; background: rgba(255,255,255,0.05);">`;
+                    html += `<div><strong>${sys.name}</strong> (ID: ${sys.id})</div>`;
+                    html += `<div>位置: x=${sys.position2D?.x?.toExponential(2)}, y=${sys.position2D?.y?.toExponential(2)}</div>`;
+                    html += `<div>所属星域: ${sys.regionName || '未知'} (ID: ${sys.regionID})</div>`;
+                    html += `<div>isExternal: ${sys.isExternal}</div>`;
+                    html += `<div>connectedFrom: ${sys.connectedFromName} (ID: ${sys.connectedFrom})</div>`;
+                    html += `</div>`;
+                });
+                html += '</div>';
+                
+                html += '<div class="section"><h3>外部连接详情</h3>';
+                regionData.externalConnections.forEach((conn, i) => {
+                    html += `<div style="margin: 5px 0; font-size: 12px;">`;
+                    html += `${conn.from} → ${conn.to} (${conn.targetSystem})`;
+                    html += `</div>`;
+                });
+                html += '</div>';
+            }
+            
+            output.innerHTML = html;
+        }
+        
+        check().catch(err => {
+            output.innerHTML = `<div class="section error"><h3>错误</h3><pre>${err.stack}</pre></div>`;
+        });
+    </script>
+</body>
+</html>

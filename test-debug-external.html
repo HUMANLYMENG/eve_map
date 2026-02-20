@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EVE Regional Map - 外部星系调试</title>
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        .debug-info { position: fixed; top: 10px; right: 10px; width: 400px; max-height: 80vh; overflow-y: auto;
+            background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: 4px; padding: 10px;
+            font-size: 11px; font-family: monospace; z-index: 1000; }
+        .debug-info h4 { margin: 0 0 10px 0; color: var(--accent-blue); }
+        .debug-info .section { margin: 10px 0; padding: 8px; background: rgba(0,0,0,0.3); border-radius: 3px; }
+        .debug-info .section h5 { margin: 0 0 5px 0; color: var(--accent-orange); }
+        .debug-info pre { margin: 0; white-space: pre-wrap; word-break: break-all; }
+    </style>
+</head>
+<body>
+    <div class="debug-info" id="debugInfo">
+        <h4>🔍 调试信息</h4>
+        <div id="debugContent">加载中...</div>
+    </div>
+
+    <div id="app">
+        <header class="header">
+            <div class="header-left">
+                <div class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/><path d="M2 12h20"/></svg></div>
+                <div class="title-group"><h1>EVE Regional Map</h1><span class="subtitle">调试版</span></div>
+            </div>
+            <div class="region-selector">
+                <select id="regionSelect"><option value="">选择星域...</option></select>
+            </div>
+            <div class="system-search">
+                <input type="text" id="searchInput" placeholder="搜索星系..." autocomplete="off">
+                <div id="searchResults" class="search-results"></div>
+            </div>
+        </header>
+        <main class="main-content">
+            <div id="mapContainer" class="map-container">
+                <canvas id="mapCanvas"></canvas>
+                <div id="loadingMask" class="loading-mask"><div class="spinner"></div><p>加载中...</p></div>
+                <div id="toast" class="toast"></div>
+            </div>
+            <div class="resizer" id="panelResizer"></div>
+            <aside class="side-panel" id="sidePanel">
+                <div class="panel-section" id="systemInfo"><h3>星系信息</h3><div class="info-content"><p class="placeholder">点击星系</p></div></div>
+            </aside>
+        </main>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
+    <script src="js/eveScoutService.js"></script>
+    
+    <script type="module">
+        import { RegionalMapApp } from './js/app.js';
+        
+        const app = new RegionalMapApp();
+        window.app = app;
+        
+        // 覆盖 setData 方法以调试
+        const originalSetData = app.renderer.setData.bind(app.renderer);
+        app.renderer.setData = function(data, skipFit) {
+            console.log('[Debug] setData called:', data);
+            updateDebugInfo(data);
+            originalSetData(data, skipFit);
+        };
+        
+        function updateDebugInfo(data) {
+            const debugDiv = document.getElementById('debugContent');
+            if (!data) {
+                debugDiv.innerHTML = '<div class="section"><h5>无数据</h5></div>';
+                return;
+            }
+            
+            const systems = data.systems || [];
+            const externalSystems = data.externalSystems || [];
+            const bounds = data.bounds || {};
+            
+            let html = `
+                <div class="section">
+                    <h5>当前星域: ${data.region?.name || '未知'}</h5>
+                    <pre>ID: ${data.region?.id}</pre>
+                </div>
+                <div class="section">
+                    <h5>本星域星系: ${systems.length} 个</h5>
+                    <pre>${systems.slice(0, 3).map(s => `${s.name} (${s.id})`).join('\n')}${systems.length > 3 ? '\n...' : ''}</pre>
+                </div>
+                <div class="section">
+                    <h5>外部星系: ${externalSystems.length} 个</h5>
+                    ${externalSystems.length > 0 ? externalSystems.map(s => `
+                        <div style="margin: 5px 0; padding: 5px; background: rgba(255,255,255,0.05); border-radius: 3px;">
+                            <div><strong>${s.name}</strong> (ID: ${s.id})</div>
+                            <div style="color: #888;">位置: x=${s.position2D?.x?.toExponential(2)}, y=${s.position2D?.y?.toExponential(2)}</div>
+                            <div style="color: #888;">所属星域: ${s.regionName || '未知'} (ID: ${s.regionID})</div>
+                            <div style="color: #5ac75a;">连接自: ${s.connectedFromName} (ID: ${s.connectedFrom})</div>
+                            <div style="color: #c78f4a;">isExternal: ${s.isExternal}</div>
+                        </div>
+                    `).join('') : '<pre style="color: #f55;">没有外部星系数据！</pre>'}
+                </div>
+                <div class="section">
+                    <h5>边界信息</h5>
+                    <pre>width: ${bounds.width?.toExponential(2)}
+height: ${bounds.height?.toExponential(2)}
+centerX: ${bounds.centerX?.toExponential(2)}
+centerY: ${bounds.centerY?.toExponential(2)}</pre>
+                </div>
+            `;
+            
+            debugDiv.innerHTML = html;
+        }
+        
+        app.init().catch(err => {
+            console.error('初始化失败:', err);
+            document.getElementById('debugContent').innerHTML = `<div class="section" style="color: #f55;"><h5>错误</h5><pre>${err.message}</pre></div>`;
+        });
+    </script>
+</body>
+</html>
