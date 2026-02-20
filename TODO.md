@@ -1,69 +1,51 @@
-# 项目待办事项
+# EVE Regional Map - 待办事项
 
-## 已完成功能 ✅
+## 已完成 ✅
 
-### 核心功能
-- [x] 数据加载模块 (YAML/JSONL)
-- [x] 星域选择器 (113个星域)
-- [x] Canvas 地图渲染
-- [x] 星系节点渲染（安全等级颜色）
-- [x] 星门连线渲染
-- [x] 鼠标交互（平移/缩放/点击）
-- [x] 入口星系标记（绿色发光效果）
-- [x] 相邻星域星系显示
-- [x] 点击跳转到相邻星域
-- [x] 星系信息面板
+### 模块化重构
+- [x] 将 main.js 拆分为 ES6 模块
+  - core/: config, eventBus, utils
+  - data/: loader, systems, regions, connections, regionDataBuilder
+  - renderer/: viewport, layers (background, connections, systems, paths, labels)
+  - features/: pathManager, pathRecorder, wormholeManager, searchManager
+  - ui/: toast
+  - interaction/: interaction handlers
+- [x] 保持原始 index.html 可用（创建 main-legacy.js）
 
-### 样式优化
-- [x] Eveeye 风格深色主题
-- [x] 圆角方形节点
-- [x] 发光效果
-- [x] 固定大小文字和图标
+### EVE Scout 集成
+- [x] 从 EVE Scout API 获取虫洞数据
+- [x] 显示 Ther a/Turnur 虫洞连接到星图（紫色虚线）
+- [x] 在 Ther a/Turnur 视图显示连接的星系（K-Space 和 J-Space）
+- [x] 外部星系定位算法，避免重叠
 
----
+### Bug 修复
+- [x] 外部路径系统定位算法改进（基于锚点）
+- [x] 视口重置问题（从虫洞返回普通星域）
+- [x] 虫洞过滤器标签功能
 
-## 计划中功能 📋
+## 待修复 🔧
 
-### 高优先级
-- [x] **搜索功能** - 按星系名称搜索
-- [ ] **当前位置标记** - 显示玩家当前所在星系
-- [ ] **航线规划** - 起点到终点的路径显示
-- [ ] **虫洞连接** - 显示虫洞连接（蓝色）
-- [ ] **跳跃桥** - 显示跳跃桥连接
+### EVE Scout 星系名称中文转换
+- [ ] Ther a 显示为 "席拉"（目前显示为英文 "Thera"）
+- [ ] Turnur 显示为 "图尔鲁尔"（目前显示为英文 "Turnur"）
+- [ ] 其他星系名称转换为中文
 
-### 中优先级
-- [ ] **星系详情弹窗** - 显示行星、空间站等信息
-- [ ] **过滤器** - 按安全等级筛选显示
-- [ ] **书签功能** - 保存常用星系
-- [ ] **历史记录** - 最近访问的星域
+**问题分析：**
+- 之前的修改导致了匹配逻辑失效
+- 需要在 `eveScoutService.js` 中正确转换星系名称
+- 同时保持 `app.js` 中的匹配逻辑正常工作
 
-### 低优先级
-- [ ] **3D 视图切换** - 可选的 3D 星图
-- [ ] **实时数据** - 击杀、跳跃数等动态数据
-- [ ] **联盟主权显示** - 显示星系主权归属
-- [ ] **本地化改进** - 更多语言支持
+**建议方案：**
+1. 保留英文匹配逻辑（'thera', 'turnur'）
+2. 在 `convertToWormholeRecord` 中转换名称为中文
+3. 在 `app.js` 中只使用英文进行匹配，但显示中文名称
 
----
+## 测试页面
 
-## 技术债务 🔧
+- test-complete.html: 完整功能测试（模块化版本）
+- index.html: 原始版本（使用 main-legacy.js）
 
-- [ ] 性能优化：大数据量渲染优化
-- [ ] 代码重构：模块化改进
-- [ ] 测试：添加单元测试
-- [ ] 文档：API 文档
+## 访问地址
 
----
-
-## 已知问题 🐛
-
-- 文字密集区域标签可能重叠（Eveeye 风格，接受）
-- 初始加载数据需要 1-2 秒
-
----
-
-## 设计理念
-
-1. **简洁优先** - 保持界面干净，信息清晰
-2. **Eveeye 风格** - 参考 Eveeye.com 的交互和视觉
-3. **性能优先** - Canvas 渲染确保流畅
-4. **响应式** - 支持不同屏幕尺寸
+- http://localhost:8080/test-complete.html (新模块化版本)
+- http://localhost:8080/index.html (原始版本)
