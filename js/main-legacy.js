@@ -679,7 +679,9 @@ class RegionalMapApp {
     onSystemHover(system) {
         // 可以在这里添加悬停提示
         if (system && system.isExternal) {
-            this.canvas.style.cursor = 'pointer';
+            this.elements.canvas.style.cursor = 'pointer';
+        } else {
+            this.elements.canvas.style.cursor = 'default';
         }
     }
     

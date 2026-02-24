@@ -87,14 +87,15 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 files = []
                 from datetime import datetime
                 
-                today = datetime.now().strftime('%Y%m%d')
-                print(f'[API] 今天的日期: {today}')
-                
-                # 只扫描当天的 Local 文件
+                # 扫描所有 Local 文件（不限于当天，按修改时间排序取最近30个）
                 all_entries = os.listdir(dir_path)
-                local_files = [e for e in all_entries if re.match(rf'^(Local|本地)_{today}_.+\.txt$', e, re.IGNORECASE)]
+                local_files = [e for e in all_entries if re.match(r'^(Local|本地)_\d{8}_.+\.txt$', e, re.IGNORECASE)]
                 
-                print(f'[API] 找到 {len(local_files)} 个当天的 Local 文件')
+                # 按修改时间排序（最新的在前），只取最近30个避免性能问题
+                local_files.sort(key=lambda x: os.path.getmtime(os.path.join(dir_path, x)), reverse=True)
+                local_files = local_files[:30]
+                
+                print(f'[API] 找到 {len(local_files)} 个 Local 文件（最近30个）')
                 
                 # 按修改时间排序（最新的在前）
                 local_files.sort(key=lambda x: os.path.getmtime(os.path.join(dir_path, x)), reverse=True)
@@ -124,6 +125,19 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 self.send_json({'success': True, 'files': files})
             except Exception as e:
                 self.send_json({'success': False, 'error': str(e)})
+            return
+        
+        elif self.path.startswith('/api/path-exists'):
+            query = self.path.split('?')[1] if '?' in self.path else ''
+            params = {}
+            for param in query.split('&'):
+                if '=' in param:
+                    k, v = param.split('=', 1)
+                    params[k] = urllib.parse.unquote(v)
+            
+            path = params.get('path', '')
+            exists = os.path.exists(path) if path else False
+            self.send_json({'exists': exists, 'path': path})
             return
         
         elif self.path.startswith('/api/read-file'):

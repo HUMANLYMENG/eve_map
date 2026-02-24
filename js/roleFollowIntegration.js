@@ -70,6 +70,25 @@
                 console.log('[RoleFollow] 默认路径不存在:', defaultPath);
             }
         }
+        
+        // Python 桥接模式下自动尝试扫描默认路径
+        if (!this.isElectron) {
+            const hasPythonBridge = await this._detectPythonBridge();
+            if (hasPythonBridge && defaultPath) {
+                try {
+                    // 验证路径是否存在
+                    const resp = await fetch(`/api/path-exists?path=${encodeURIComponent(defaultPath)}`);
+                    const result = await resp.json();
+                    if (result.exists) {
+                        this.currentLogDirectory = defaultPath;
+                        await this._scanRolesPython(defaultPath);
+                        this.showToast('已自动加载默认日志目录 (Python桥接)');
+                    }
+                } catch (e) {
+                    console.log('[RoleFollow] Python桥接默认路径不存在或无法访问:', defaultPath);
+                }
+            }
+        }
     };
     
     /**
