@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; connect-src 'self' https://api.eve-scout.com;">
     <title>EVE Regional Map - Eveeye Style</title>
     <link rel="stylesheet" href="css/style.css">
 </head>
@@ -95,11 +96,65 @@
                     </div>
                 </div>
 
+                <!-- 角色跟随 -->
+                <div class="panel-section" id="rolePanel">
+                    <div class="role-panel">
+                        <div class="role-panel-header">
+                            <h3>角色跟随</h3>
+                            <span class="role-status-indicator" id="roleStatusIndicator">●</span>
+                        </div>
+                        
+                        <div class="role-controls">
+                            <div class="role-select-row">
+                                <label>选择角色:</label>
+                                <select id="roleSelect" class="role-select">
+                                    <option value="">-- 选择角色 --</option>
+                                </select>
+                            </div>
+                            
+                            <div class="role-buttons">
+                                <button id="btnRefreshRoles" class="btn-secondary" title="刷新角色列表">🔄</button>
+                                <button id="btnToggleFollow" class="btn-primary" disabled>开始跟随</button>
+                            </div>
+                        </div>
+                        
+                        <div class="role-current-info" id="roleCurrentInfo" style="display: none;">
+                            <div class="info-row">
+                                <span class="info-label">当前角色:</span>
+                                <span class="info-value" id="currentRoleName">-</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">所在星系:</span>
+                                <span class="info-value" id="currentSystemName">-</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">安全等级:</span>
+                                <span class="info-value" id="currentSecurityStatus">-</span>
+                            </div>
+                        </div>
+                        
+                        <div class="role-list-section">
+                            <h4>可用角色</h4>
+                            <div class="role-list" id="roleList">
+                                <p class="placeholder">暂无角色，请选择日志目录</p>
+                            </div>
+                        </div>
+                        
+                        <div class="role-log-path">
+                            <label>日志目录:</label>
+                            <div class="path-row">
+                                <input type="text" id="logPathInput" readonly placeholder="选择 EVE 日志目录..." />
+                                <button id="btnSelectLogDir" class="btn-secondary">浏览...</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- 路径记录 -->
                 <div class="panel-section" id="pathPanel">
                     <h3>路径记录 <span class="path-count">(显示最近6个)</span></h3>
                     <div class="path-list">
-                        <p class="placeholder">点击星系记录路径</p>
+                        <p class="placeholder">点击星系记录路径，或启用角色跟随自动记录</p>
                     </div>
                     <button class="clear-path-btn" onclick="window.app.clearPath()">清除路径</button>
                 </div>
@@ -125,5 +180,6 @@
     <script src="js/interaction.js?v=90"></script>
     <script src="js/eveScoutService.js?v=90"></script>
     <script src="js/main-legacy.js?v=90"></script>
+    <script src="js/roleFollowIntegration.js?v=90"></script>
 </body>
 </html>

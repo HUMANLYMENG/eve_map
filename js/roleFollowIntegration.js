@@ -1,0 +1,1046 @@
+/**
+ * @fileoverview 角色跟随功能集成
+ * 补充 main-legacy.js 的角色跟随功能
+ * 支持浏览器环境和 Electron 环境
+ */
+
+(function() {
+    // 在 RegionalMapApp 原型上添加角色跟随方法
+    
+    /**
+     * 初始化角色跟随功能
+     */
+    RegionalMapApp.prototype.initRoleFollow = function() {
+        // 角色跟随相关状态
+        this.roleManager = null;
+        this.followMode = null;
+        this.rolePanelElements = {};
+        this.currentLogDirectory = null;
+        this.currentWatchId = null;
+        
+        // 检测运行环境
+        this.isElectron = window.electronAPI?.isElectron === true;
+        
+        this._cacheRolePanelElements();
+        this._bindRolePanelEvents();
+        
+        // 设置默认日志路径显示
+        this._setDefaultLogPath();
+        
+        console.log('[RoleFollow] 角色跟随功能已初始化' + (this.isElectron ? ' (Electron 模式)' : ' (浏览器模式)'));
+    };
+    
+    /**
+     * 设置默认日志路径显示
+     * @private
+     */
+    RegionalMapApp.prototype._setDefaultLogPath = async function() {
+        let defaultPath = '';
+        
+        if (this.isElectron) {
+            // Electron 环境：从主进程获取默认路径
+            try {
+                defaultPath = await window.electronAPI.getDefaultLogPath();
+            } catch (e) {
+                console.warn('[RoleFollow] 获取默认路径失败:', e);
+                defaultPath = 'C:\\Users\\Username\\Documents\\EVE\\logs\\Chatlogs';
+            }
+        } else {
+            // 浏览器环境：根据 UserAgent 推断
+            defaultPath = this._getBrowserDefaultLogPath();
+        }
+        
+        if (this.rolePanelElements.logPathInput) {
+            this.rolePanelElements.logPathInput.value = defaultPath;
+            this.rolePanelElements.logPathInput.title = this.isElectron 
+                ? '点击"浏览..."选择目录，或直接使用默认路径'
+                : '点击"浏览..."选择目录（需要 Chrome/Edge）';
+        }
+        
+        // Electron 环境下自动检查默认路径是否存在
+        if (this.isElectron && defaultPath) {
+            try {
+                const exists = await window.electronAPI.pathExists(defaultPath);
+                if (exists) {
+                    this.currentLogDirectory = defaultPath;
+                    await this._scanRoles(defaultPath);
+                    this.showToast('已自动加载默认日志目录');
+                }
+            } catch (e) {
+                console.log('[RoleFollow] 默认路径不存在:', defaultPath);
+            }
+        }
+    };
+    
+    /**
+     * 获取浏览器环境的默认日志路径
+     * @private
+     */
+    RegionalMapApp.prototype._getBrowserDefaultLogPath = function() {
+        const userHome = navigator.userAgent.includes('Windows') ? 
+            'C:\\Users\\' + (navigator.userAgent.match(/\\b\\w+$/) || ['Username'])[0] :
+            '~';
+        return userHome + '\\Documents\\EVE\\logs\\Chatlogs';
+    };
+    
+    /**
+     * 缓存角色面板元素
+     * @private
+     */
+    RegionalMapApp.prototype._cacheRolePanelElements = function() {
+        this.rolePanelElements = {
+            roleSelect: document.getElementById('roleSelect'),
+            btnRefreshRoles: document.getElementById('btnRefreshRoles'),
+            btnToggleFollow: document.getElementById('btnToggleFollow'),
+            btnSelectLogDir: document.getElementById('btnSelectLogDir'),
+            logPathInput: document.getElementById('logPathInput'),
+            roleList: document.getElementById('roleList'),
+            roleCurrentInfo: document.getElementById('roleCurrentInfo'),
+            currentRoleName: document.getElementById('currentRoleName'),
+            currentSystemName: document.getElementById('currentSystemName'),
+            currentSecurityStatus: document.getElementById('currentSecurityStatus'),
+            statusIndicator: document.getElementById('roleStatusIndicator')
+        };
+    };
+    
+    /**
+     * 绑定角色面板事件
+     * @private
+     */
+    RegionalMapApp.prototype._bindRolePanelEvents = function() {
+        const elems = this.rolePanelElements;
+        
+        // 选择日志目录
+        elems.btnSelectLogDir.addEventListener('click', () => {
+            this._selectLogDirectory();
+        });
+        
+        // 刷新角色列表
+        elems.btnRefreshRoles.addEventListener('click', () => {
+            this._refreshRoles();
+        });
+        
+        // 选择角色
+        elems.roleSelect.addEventListener('change', (e) => {
+            const roleName = e.target.value;
+            elems.btnToggleFollow.disabled = !roleName;
+        });
+        
+        // 开始/停止跟随
+        elems.btnToggleFollow.addEventListener('click', () => {
+            this._toggleFollow();
+        });
+    };
+    
+    /**
+     * 检测是否有 Python 桥接后端
+     * @private
+     */
+    RegionalMapApp.prototype._detectPythonBridge = async function() {
+        try {
+            const resp = await fetch('/api/default-log-path');
+            return resp.ok;
+        } catch {
+            return false;
+        }
+    };
+    
+    /**
+     * 选择日志目录
+     * @private
+     */
+    RegionalMapApp.prototype._selectLogDirectory = async function() {
+        // 先检测是否有 Python 桥接
+        const hasPythonBridge = await this._detectPythonBridge();
+        
+        if (hasPythonBridge) {
+            await this._selectLogDirectoryPython();
+        } else if (this.isElectron) {
+            await this._selectLogDirectoryElectron();
+        } else {
+            await this._selectLogDirectoryBrowser();
+        }
+    };
+    
+    /**
+     * Python 桥接方式选择目录
+     * @private
+     */
+    RegionalMapApp.prototype._selectLogDirectoryPython = async function() {
+        try {
+            // 获取默认路径
+            const resp = await fetch('/api/default-log-path');
+            const data = await resp.json();
+            const defaultPath = data.path;
+            
+            // 提示用户输入路径（简化版，实际可以用 input 弹窗）
+            const userPath = prompt('请输入 EVE 日志目录路径:', defaultPath);
+            
+            if (!userPath) return;
+            
+            this.currentLogDirectory = userPath;
+            this.rolePanelElements.logPathInput.value = userPath;
+            
+            // 扫描角色
+            await this._scanRolesPython(userPath);
+            this.showToast('目录已选择');
+            
+        } catch (e) {
+            console.error('[RoleFollow] Python 桥接选择目录失败:', e);
+            this.showToast('选择目录失败: ' + e.message, 'error');
+        }
+    };
+    
+    /**
+     * Python 桥接方式扫描角色
+     * @private
+     */
+    RegionalMapApp.prototype._scanRolesPython = async function(dirPath) {
+        const roles = [];
+        const roleMap = new Map(); // 用于去重，保留最新的
+        
+        try {
+            const resp = await fetch(`/api/scan-directory?path=${encodeURIComponent(dirPath)}`);
+            const result = await resp.json();
+            
+            if (!result.success) {
+                console.error('[RoleFollow] 扫描目录失败:', result.error);
+                this.showToast('扫描目录失败: ' + result.error, 'error');
+                return;
+            }
+            
+            // 文件已按修改时间排序，遍历去重
+            for (const file of result.files) {
+                const listenerMatch = file.content.match(/Listener:\s*(.+)/);
+                if (listenerMatch) {
+                    const roleName = listenerMatch[1].trim();
+                    // 只保留第一个（最新的）
+                    if (!roleMap.has(roleName)) {
+                        const isChinese = /频道更换为本地/.test(file.content);
+                        roleMap.set(roleName, {
+                            name: roleName,
+                            filePath: file.path,
+                            isChineseClient: isChinese
+                        });
+                    }
+                }
+            }
+            
+            // 转换为数组
+            roles.push(...roleMap.values());
+            
+        } catch (e) {
+            console.error('[RoleFollow] Python 桥接扫描角色失败:', e);
+        }
+        
+        this._updateRoleList(roles);
+        this.showToast(`找到 ${roles.length} 个角色`);
+    };
+    
+    /**
+     * Electron 环境选择目录
+     * @private
+     */
+    RegionalMapApp.prototype._selectLogDirectoryElectron = async function() {
+        try {
+            const result = await window.electronAPI.selectDirectory();
+            
+            if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
+                return;
+            }
+            
+            const dirPath = result.filePaths[0];
+            this.currentLogDirectory = dirPath;
+            
+            // 更新输入框显示
+            this.rolePanelElements.logPathInput.value = dirPath;
+            
+            // 扫描角色
+            await this._scanRoles(dirPath);
+            this.showToast('目录选择成功');
+            
+        } catch (e) {
+            console.error('[RoleFollow] 选择目录失败:', e);
+            this.showToast('选择目录失败: ' + e.message, 'error');
+        }
+    };
+    
+    /**
+     * 浏览器环境选择目录
+     * @private
+     */
+    RegionalMapApp.prototype._selectLogDirectoryBrowser = async function() {
+        // 检查浏览器支持
+        if (!('showDirectoryPicker' in window)) {
+            const isHTTPS = window.location.protocol === 'https:';
+            const isLocalhost = window.location.hostname === 'localhost' || 
+                               window.location.hostname === '127.0.0.1';
+            
+            if (!isHTTPS && !isLocalhost) {
+                alert('文件选择功能需要以下之一：\n1. 通过 HTTPS 访问\n2. 本地访问 (localhost/127.0.0.1)\n\n建议使用 Electron 版本以获得最佳体验。');
+            } else {
+                alert('您的浏览器不支持文件选择功能。\n\n请使用 Chrome 86+, Edge 86+, 或 Opera 72+\n\n建议使用 Electron 版本以获得最佳体验。');
+            }
+            return;
+        }
+        
+        try {
+            const dirHandle = await window.showDirectoryPicker();
+            
+            if (dirHandle.requestPermission) {
+                const permission = await dirHandle.requestPermission({ mode: 'read' });
+                if (permission !== 'granted') {
+                    this.showToast('需要读取权限才能扫描日志', 'error');
+                    return;
+                }
+            }
+            
+            this.currentLogDirectory = dirHandle;
+            this.rolePanelElements.logPathInput.value = dirHandle.name;
+            this.rolePanelElements.logPathInput.dataset.hasPermission = 'true';
+            
+            await this._scanRoles(dirHandle);
+            this.showToast('目录选择成功: ' + dirHandle.name);
+            
+        } catch (e) {
+            if (e.name === 'AbortError') {
+                console.log('[RoleFollow] 用户取消了目录选择');
+            } else if (e.name === 'SecurityError') {
+                alert('安全限制：无法访问目录\n\n请确保：\n1. 使用 HTTPS 或 localhost\n2. 允许网站的文件访问权限');
+            } else {
+                console.error('[RoleFollow] 选择目录失败:', e);
+                this.showToast('选择目录失败: ' + e.message, 'error');
+            }
+        }
+    };
+    
+    /**
+     * 扫描角色
+     * @private
+     */
+    RegionalMapApp.prototype._scanRoles = async function(dirPathOrHandle) {
+        let roles = [];
+        
+        if (this.isElectron) {
+            roles = await this._scanRolesElectron(dirPathOrHandle);
+        } else {
+            roles = await this._scanRolesBrowser(dirPathOrHandle);
+        }
+        
+        this._updateRoleList(roles);
+        this.showToast(`找到 ${roles.length} 个角色`);
+    };
+    
+    /**
+     * Electron 环境扫描角色
+     * @private
+     */
+    RegionalMapApp.prototype._scanRolesElectron = async function(dirPath) {
+        const roles = [];
+        
+        try {
+            const result = await window.electronAPI.scanLogDirectory(dirPath);
+            
+            if (!result.success) {
+                console.error('[RoleFollow] 扫描目录失败:', result.error);
+                return roles;
+            }
+            
+            for (const file of result.files) {
+                const listenerMatch = file.content.match(/Listener:\s*(.+)/);
+                if (listenerMatch) {
+                    const isChinese = /频道更换为本地/.test(file.content);
+                    roles.push({
+                        name: listenerMatch[1].trim(),
+                        filePath: file.path,
+                        isChineseClient: isChinese
+                    });
+                }
+            }
+        } catch (e) {
+            console.error('[RoleFollow] 扫描角色失败:', e);
+        }
+        
+        return roles;
+    };
+    
+    /**
+     * 浏览器环境扫描角色
+     * @private
+     */
+    RegionalMapApp.prototype._scanRolesBrowser = async function(dirHandle) {
+        const roles = [];
+        
+        try {
+            for await (const [name, handle] of dirHandle.entries()) {
+                if (handle.kind === 'file' && /^(Local|本地)_.+\.txt$/i.test(name)) {
+                    try {
+                        const file = await handle.getFile();
+                        const content = await file.text();
+                        
+                        const listenerMatch = content.match(/Listener:\s*(.+)/);
+                        if (listenerMatch) {
+                            const isChinese = /频道更换为本地/.test(content);
+                            roles.push({
+                                name: listenerMatch[1].trim(),
+                                fileHandle: handle,
+                                isChineseClient: isChinese
+                            });
+                        }
+                    } catch (e) {
+                        console.warn('[RoleFollow] 读取文件失败:', name);
+                    }
+                }
+            }
+        } catch (e) {
+            console.error('[RoleFollow] 扫描角色失败:', e);
+        }
+        
+        return roles;
+    };
+    
+    /**
+     * 更新角色列表
+     * @private
+     */
+    RegionalMapApp.prototype._updateRoleList = function(roles) {
+        const elems = this.rolePanelElements;
+        
+        // 存储角色信息供后续使用
+        this.scannedRoles = roles;
+        
+        // 更新下拉框
+        elems.roleSelect.innerHTML = '<option value="">-- 选择角色 --</option>';
+        for (const role of roles) {
+            const option = document.createElement('option');
+            option.value = role.name;
+            option.textContent = role.name;
+            option.dataset.isChinese = role.isChineseClient;
+            elems.roleSelect.appendChild(option);
+        }
+        
+        // 更新角色列表显示
+        if (roles.length === 0) {
+            elems.roleList.innerHTML = '<p class="placeholder">暂无角色，请选择日志目录</p>';
+            return;
+        }
+        
+        elems.roleList.innerHTML = '';
+        for (const role of roles) {
+            const item = document.createElement('div');
+            item.className = 'role-list-item';
+            item.innerHTML = `
+                <span class="role-name">${role.name}</span>
+                <span class="role-client ${role.isChineseClient ? 'zh' : 'en'}">
+                    ${role.isChineseClient ? '中' : 'EN'}
+                </span>
+            `;
+            elems.roleList.appendChild(item);
+        }
+    };
+    
+    /**
+     * 刷新角色列表
+     * @private
+     */
+    RegionalMapApp.prototype._refreshRoles = async function() {
+        if (!this.currentLogDirectory) {
+            this.showToast('请先选择日志目录', 'error');
+            return;
+        }
+        await this._scanRoles(this.currentLogDirectory);
+    };
+    
+    /**
+     * 切换跟随模式
+     * @private
+     */
+    RegionalMapApp.prototype._toggleFollow = async function() {
+        const elems = this.rolePanelElements;
+        const roleName = elems.roleSelect.value;
+        
+        if (!roleName) return;
+        
+        // 检查是否已经在跟随
+        if (elems.btnToggleFollow.textContent === '停止跟随') {
+            this._stopFollowing();
+            return;
+        }
+        
+        // 开始跟随
+        await this._startFollowing(roleName);
+    };
+    
+    /**
+     * 开始跟随
+     * @private
+     */
+    RegionalMapApp.prototype._startFollowing = async function(roleName) {
+        const elems = this.rolePanelElements;
+        
+        // 获取角色信息
+        const role = this.scannedRoles?.find(r => r.name === roleName);
+        if (!role) {
+            console.error('[RoleFollow] 找不到角色:', roleName);
+            return;
+        }
+        
+        console.log('[RoleFollow] 开始跟随角色:', roleName, 'role:', role);
+        
+        // 清空现有路径
+        this.pathRecorder.clear();
+        this.updatePathPanel();
+        
+        // 更新 UI
+        elems.btnToggleFollow.textContent = '停止跟随';
+        elems.btnToggleFollow.classList.remove('btn-primary');
+        elems.btnToggleFollow.classList.add('btn-danger');
+        elems.roleSelect.disabled = true;
+        elems.statusIndicator.classList.add('active');
+        
+        // 获取当前星系
+        let currentSystem = null;
+        
+        // 根据角色存储的数据类型判断使用哪种方式
+        if (role.filePath) {
+            // Python 桥接方式 - 使用 filePath
+            console.log('[RoleFollow] 使用 Python 桥接方式获取当前星系');
+            currentSystem = await this._getCurrentSystemPython(role);
+        } else if (this.isElectron) {
+            currentSystem = await this._getCurrentSystemElectron(role);
+        } else if (role.fileHandle) {
+            currentSystem = await this._getCurrentSystemBrowser(role);
+        }
+        
+        console.log('[RoleFollow] 当前星系对象:', currentSystem);
+        
+        if (currentSystem) {
+            console.log('[RoleFollow] 星系详情:', {
+                name: currentSystem.name || currentSystem.nameZh,
+                id: currentSystem.id,
+                regionID: currentSystem.regionID,
+                hasName: !!currentSystem.name,
+                hasNameZh: !!currentSystem.nameZh
+            });
+            
+            // 确保星系对象有必要的属性
+            if (!currentSystem.regionID) {
+                console.error('[RoleFollow] 星系对象缺少 regionID');
+                this.showToast('星系数据不完整', 'error');
+                return;
+            }
+            
+            // 添加到路径（先添加再切换，这样路径面板会显示）
+            console.log('[RoleFollow] 添加到路径记录器');
+            this.pathRecorder.addSystem(currentSystem);
+            console.log('[RoleFollow] 路径记录器状态:', {
+                pathCount: this.pathRecorder.getDisplayPath().length,
+                visitOrder: this.pathRecorder.getVisitOrder().length
+            });
+            
+            // 更新路径面板
+            console.log('[RoleFollow] 更新路径面板');
+            this.updatePathPanel();
+            
+            // 设置路径数据到渲染器
+            console.log('[RoleFollow] 设置路径数据到渲染器');
+            this.renderer.setPathData(
+                this.pathRecorder.getDisplayPath(),
+                this.pathRecorder.getDisplayConnections()
+            );
+            
+            // 切换到该星系所在星域并选中
+            console.log('[RoleFollow] 切换到星域:', currentSystem.regionID, '星系:', currentSystem.id);
+            this.selectRegion(currentSystem.regionID, currentSystem.id, true);
+            
+            // 延迟居中以确保渲染完成
+            console.log('[RoleFollow] 准备居中到星系');
+            setTimeout(() => {
+                console.log('[RoleFollow] 执行居中');
+                this.renderer.centerOnSystem(currentSystem);
+                console.log('[RoleFollow] 已居中到星系');
+            }, 200);
+            
+            // 更新角色信息面板
+            elems.roleCurrentInfo.style.display = 'block';
+            elems.currentRoleName.textContent = roleName;
+            elems.currentSystemName.textContent = currentSystem.name || currentSystem.nameZh;
+            
+            const security = currentSystem.securityStatus;
+            if (security !== undefined) {
+                const secText = security.toFixed(1);
+                const secClass = security >= 0.5 ? 'high' : security > 0 ? 'low' : 'null';
+                elems.currentSecurityStatus.innerHTML = 
+                    `<span class="security-${secClass}">${secText}</span>`;
+            }
+            
+            this.showToast(`已定位到: ${currentSystem.name || currentSystem.nameZh}`, 'success');
+        } else {
+            // 找不到星系时仍然继续跟随，只是不聚焦
+            console.warn('[RoleFollow] 无法获取当前星系，角色可能未换过星系');
+            this.showToast('开始跟随角色，请在游戏中切换一次星系以定位', 'info');
+            
+            // 仍然显示角色信息面板
+            elems.roleCurrentInfo.style.display = 'block';
+            elems.currentRoleName.textContent = roleName;
+            elems.currentSystemName.textContent = '等待定位...';
+            elems.currentSecurityStatus.innerHTML = '<span>-</span>';
+        }
+        
+        // 开始监控文件变化
+        this._startFileWatching(roleName);
+        
+        this.showToast(`开始跟随角色: ${roleName}`);
+    };
+    
+    /**
+     * Python 桥接方式获取当前星系
+     * @private
+     */
+    RegionalMapApp.prototype._getCurrentSystemPython = async function(role) {
+        if (!role.filePath) {
+            console.warn('[RoleFollow] Python 方式: 没有 filePath');
+            return null;
+        }
+        
+        try {
+            console.log('[RoleFollow] Python 方式: 读取文件', role.filePath);
+            const resp = await fetch(`/api/read-file?path=${encodeURIComponent(role.filePath)}`);
+            const result = await resp.json();
+            
+            if (!result.success) {
+                console.warn('[RoleFollow] Python 方式: 读取日志失败:', result.error);
+                return null;
+            }
+            
+            const content = result.content;
+            const lines = content.split(/\r?\n/);
+            
+            // 方法1: 从后往前找星系变化记录（最新的）
+            // 参考 eve_multi_pixel_monitor.py 的匹配方式
+            for (let i = lines.length - 1; i >= 0; i--) {
+                const line = lines[i];
+                // 匹配英文或中文格式: Channel changed to Local : SystemName 或 频道更换为本地：SystemName
+                // 使用 (?:Local|本地) 匹配英文或中文前缀，\s*[:：]\s* 匹配中英文冒号
+                const systemMatch = line.match(/(?:Local|本地)\s*[:：]\s*(.+)/i);
+                if (systemMatch) {
+                    const systemName = systemMatch[1].trim().replace(/\*$/, '');
+                    console.log('[RoleFollow] Python 方式: 从变化记录找到星系', systemName);
+                    return this._findSystemByName(systemName);
+                }
+            }
+            
+            // 方法2: 如果文件刚创建，还没有换过星系，尝试从文件第一行找（如果有的话）
+            // 实际上 EVE 日志不会在头部显示当前星系，只能通过变化记录
+            
+            console.warn('[RoleFollow] Python 方式: 日志中没有找到星系变化记录，角色可能未换过星系');
+        } catch (e) {
+            console.warn('[RoleFollow] Python 方式: 获取当前星系失败:', e);
+        }
+        
+        return null;
+    };
+    
+    /**
+     * Electron 环境获取当前星系
+     * @private
+     */
+    RegionalMapApp.prototype._getCurrentSystemElectron = async function(role) {
+        try {
+            const result = await window.electronAPI.readLogFile(role.filePath);
+            
+            if (!result.success) {
+                console.warn('[RoleFollow] 读取日志失败:', result.error);
+                return null;
+            }
+            
+            const content = result.content;
+            const lines = content.split(/\r?\n/);
+            
+            for (let i = lines.length - 1; i >= 0; i--) {
+                const systemMatch = lines[i].match(/Channel changed to Local\s*:\s*(.+)/i) ||
+                                   lines[i].match(/频道更换为本地\s*:\s*(.+)/);
+                if (systemMatch) {
+                    const systemName = systemMatch[1].trim().replace(/\*$/, '');
+                    return this._findSystemByName(systemName);
+                }
+            }
+        } catch (e) {
+            console.warn('[RoleFollow] 获取当前星系失败:', e);
+        }
+        
+        return null;
+    };
+    
+    /**
+     * 浏览器环境获取当前星系
+     * @private
+     */
+    RegionalMapApp.prototype._getCurrentSystemBrowser = async function(role) {
+        if (!role.fileHandle) return null;
+        
+        try {
+            const file = await role.fileHandle.getFile();
+            const content = await file.text();
+            
+            const lines = content.split(/\r?\n/);
+            for (let i = lines.length - 1; i >= 0; i--) {
+                const systemMatch = lines[i].match(/Channel changed to Local\s*:\s*(.+)/i) ||
+                                   lines[i].match(/频道更换为本地\s*:\s*(.+)/);
+                if (systemMatch) {
+                    const systemName = systemMatch[1].trim().replace(/\*$/, '');
+                    return this._findSystemByName(systemName);
+                }
+            }
+        } catch (e) {
+            console.warn('[RoleFollow] 获取当前星系失败:', e);
+        }
+        
+        return null;
+    };
+    
+    /**
+     * 停止跟随
+     * @private
+     */
+    RegionalMapApp.prototype._stopFollowing = async function() {
+        const elems = this.rolePanelElements;
+        
+        // 停止监控
+        if (this.isElectron && this.currentWatchId) {
+            try {
+                await window.electronAPI.stopWatching(this.currentWatchId);
+            } catch (e) {
+                console.warn('[RoleFollow] 停止监控失败:', e);
+            }
+            this.currentWatchId = null;
+        }
+        
+        if (this._fileWatchTimer) {
+            clearInterval(this._fileWatchTimer);
+            this._fileWatchTimer = null;
+        }
+        
+        // 移除 Electron 事件监听
+        if (this.isElectron) {
+            window.electronAPI.removeAllListeners('system-change');
+        }
+        
+        // 更新 UI
+        elems.btnToggleFollow.textContent = '开始跟随';
+        elems.btnToggleFollow.classList.remove('btn-danger');
+        elems.btnToggleFollow.classList.add('btn-primary');
+        elems.roleSelect.disabled = false;
+        elems.statusIndicator.classList.remove('active');
+        elems.roleCurrentInfo.style.display = 'none';
+        
+        this.showToast('已停止跟随');
+    };
+    
+    /**
+     * 开始监控文件变化
+     * @private
+     */
+    RegionalMapApp.prototype._startFileWatching = async function(roleName) {
+        const role = this.scannedRoles?.find(r => r.name === roleName);
+        if (!role) return;
+        
+        // 根据角色存储的数据类型判断使用哪种方式
+        if (role.filePath) {
+            // Python 桥接方式
+            console.log('[RoleFollow] 使用 Python 桥接方式监控文件');
+            this._startFileWatchingPython(roleName);
+        } else if (this.isElectron) {
+            await this._startFileWatchingElectron(roleName);
+        } else if (role.fileHandle) {
+            this._startFileWatchingBrowser(roleName);
+        }
+    };
+    
+    /**
+     * Python 桥接方式监控文件变化
+     * @private
+     */
+    RegionalMapApp.prototype._startFileWatchingPython = function(roleName) {
+        let lastSystemId = null;
+        const role = this.scannedRoles?.find(r => r.name === roleName);
+        if (!role || !role.filePath) return;
+        
+        console.log('[RoleFollow] Python 方式: 开始监控', role.filePath);
+        
+        this._fileWatchTimer = setInterval(async () => {
+            const currentSystem = await this._getCurrentSystemPython(role);
+            if (currentSystem && currentSystem.id !== lastSystemId) {
+                console.log('[RoleFollow] Python 方式: 检测到星系变化', currentSystem.name);
+                lastSystemId = currentSystem.id;
+                this._handleSystemChange(currentSystem);
+            }
+        }, 1000);
+    };
+    
+    /**
+     * Electron 环境监控文件变化
+     * @private
+     */
+    RegionalMapApp.prototype._startFileWatchingElectron = async function(roleName) {
+        const role = this.scannedRoles?.find(r => r.name === roleName);
+        if (!role) return;
+        
+        try {
+            // 先获取一次当前系统作为基准
+            let lastSystem = await this._getCurrentSystemElectron(role);
+            
+            // 设置监听器
+            window.electronAPI.onSystemChange((data) => {
+                if (data.roleName !== roleName) return;
+                
+                const system = this._findSystemByName(data.systemName);
+                if (system && (!lastSystem || system.id !== lastSystem.id)) {
+                    lastSystem = system;
+                    this._handleSystemChange(system);
+                }
+            });
+            
+            // 启动监控
+            const result = await window.electronAPI.startWatching(
+                this.currentLogDirectory,
+                roleName
+            );
+            
+            if (result.success) {
+                this.currentWatchId = result.watchId;
+            }
+            
+        } catch (e) {
+            console.error('[RoleFollow] 启动监控失败:', e);
+            // 降级到轮询
+            this._startFileWatchingBrowser(roleName);
+        }
+    };
+    
+    /**
+     * 浏览器环境监控文件变化
+     * @private
+     */
+    RegionalMapApp.prototype._startFileWatchingBrowser = function(roleName) {
+        let lastSystemId = null;
+        
+        this._fileWatchTimer = setInterval(async () => {
+            const currentSystem = await this._getCurrentSystemFromLog(roleName);
+            if (currentSystem && currentSystem.id !== lastSystemId) {
+                lastSystemId = currentSystem.id;
+                this._handleSystemChange(currentSystem);
+            }
+        }, 1000);
+    };
+    
+    /**
+     * 处理星系变化
+     * @private
+     */
+    RegionalMapApp.prototype._handleSystemChange = function(system) {
+        console.log('[RoleFollow] _handleSystemChange:', system.name, 'regionID:', system.regionID);
+        
+        // 添加新星系到路径
+        this.pathRecorder.addSystem(system);
+        this.updatePathPanel();
+        this.renderer.setPathData(
+            this.pathRecorder.getDisplayPath(),
+            this.pathRecorder.getDisplayConnections()
+        );
+        
+        // 切换到新星系所在星域并选中该星系
+        console.log('[RoleFollow] 切换到星域:', system.regionID, '选中星系:', system.id);
+        this.selectRegion(system.regionID, system.id, true);
+        
+        // 检测虫洞连接（无星门连接）- 延迟执行确保地图已渲染
+        setTimeout(() => {
+            console.log('[RoleFollow] 检测虫洞连接...');
+            this.detectWormholes();
+        }, 500);
+        
+        // 更新显示
+        const elems = this.rolePanelElements;
+        elems.currentSystemName.textContent = system.name || system.nameZh;
+        
+        const security = system.securityStatus;
+        if (security !== undefined) {
+            const secText = security.toFixed(1);
+            const secClass = security >= 0.5 ? 'high' : security > 0 ? 'low' : 'null';
+            elems.currentSecurityStatus.innerHTML = 
+                `<span class="security-${secClass}">${secText}</span>`;
+        }
+        
+        this.showToast(`进入星系: ${system.name || system.nameZh}`);
+    };
+    
+    /**
+     * 从日志获取当前星系（浏览器环境）
+     * @private
+     */
+    RegionalMapApp.prototype._getCurrentSystemFromLog = async function(roleName) {
+        if (!this.currentLogDirectory) return null;
+        
+        const role = this.scannedRoles?.find(r => r.name === roleName);
+        if (!role || !role.fileHandle) return null;
+        
+        try {
+            const file = await role.fileHandle.getFile();
+            const content = await file.text();
+            
+            const lines = content.split(/\r?\n/);
+            for (let i = lines.length - 1; i >= 0; i--) {
+                const systemMatch = lines[i].match(/Channel changed to Local\s*:\s*(.+)/i) ||
+                                   lines[i].match(/频道更换为本地\s*:\s*(.+)/);
+                if (systemMatch) {
+                    const systemName = systemMatch[1].trim().replace(/\*$/, '');
+                    return this._findSystemByName(systemName);
+                }
+            }
+        } catch (e) {
+            console.warn('[RoleFollow] 读取文件失败:', e);
+        }
+        
+        return null;
+    };
+    
+    /**
+     * 根据名称查找星系
+     * @private
+     */
+    RegionalMapApp.prototype._findSystemByName = function(name) {
+        console.log('[RoleFollow] 查找星系:', name);
+        
+        if (!name) return null;
+        
+        // 调试：检查 dataLoader 状态
+        if (!dataLoader.loaded) {
+            console.warn('[RoleFollow] dataLoader 未加载完成');
+            return null;
+        }
+        console.log('[RoleFollow] dataLoader 状态:', {
+            systemsCount: dataLoader.systems.size,
+            wormholeSystemsCount: dataLoader.wormholeSystems.size
+        });
+        
+        // 清理名称：去除首尾空格，统一大小写
+        const cleanName = name.trim();
+        const lowerName = cleanName.toLowerCase();
+        
+        // 简单的中英文映射（小写键用于不区分大小写匹配）
+        const nameMap = {
+            'jita': '吉他', '吉他': 'Jita',
+            'perimeter': '周边', '周边': 'Perimeter',
+            'new caldari': '新加达里', '新加达里': 'New Caldari',
+            'amarr': '艾玛', '艾玛': 'Amarr',
+            'rens': '伦斯', '伦斯': 'Rens',
+            'dodixie': '多迪谢', '多迪谢': 'Dodixie',
+            'aeschee': '艾舍', '艾舍': 'Aeschee',
+            'thera': '席拉', '席拉': 'Thera',
+            'turnur': '图尔鲁尔', '图尔鲁尔': 'Turnur'
+        };
+        
+        // 直接查找（不区分大小写）- 同时匹配 name(中文)、nameEn(英文) 和 nameZh(中文备用)
+        for (const system of dataLoader.systems.values()) {
+            const sysName = (system.name || '').trim();
+            const sysNameEn = (system.nameEn || '').trim();
+            const sysNameZh = (system.nameZh || '').trim();
+            
+            if (sysName.toLowerCase() === lowerName || 
+                sysNameEn.toLowerCase() === lowerName || 
+                sysNameZh === cleanName) {
+                console.log('[RoleFollow] 找到星系:', system.name, 'regionID:', system.regionID);
+                return system;
+            }
+        }
+        
+        // 映射后查找
+        const mappedName = nameMap[lowerName];
+        if (mappedName) {
+            for (const system of dataLoader.systems.values()) {
+                const sysName = (system.name || '').trim();
+                const sysNameEn = (system.nameEn || '').trim();
+                const sysNameZh = (system.nameZh || '').trim();
+                
+                if (sysName === mappedName || 
+                    sysNameEn === mappedName || 
+                    sysNameZh === mappedName) {
+                    console.log('[RoleFollow] 通过映射找到星系:', system.name, 'regionID:', system.regionID);
+                    return system;
+                }
+            }
+        }
+        
+        console.warn('[RoleFollow] 未找到星系:', name, '(清理后:', cleanName + ')');
+        return null;
+    };
+    
+    /**
+     * 更新路径面板
+     */
+    RegionalMapApp.prototype.updatePathPanel = function() {
+        const container = this.elements.pathList;
+        if (!container) return;
+        
+        const visitOrder = this.pathRecorder.getVisitOrder();
+        
+        if (visitOrder.length === 0) {
+            container.innerHTML = '<p class="placeholder">点击星系记录路径，或启用角色跟随自动记录</p>';
+            return;
+        }
+        
+        let html = '';
+        visitOrder.forEach((item, index) => {
+            const isInDisplay = index >= visitOrder.length - this.pathRecorder.maxDisplay;
+            const displayClass = isInDisplay ? 'path-item-display' : 'path-item-history';
+            
+            html += `
+                <div class="path-item ${displayClass}" data-system-id="${item.id}" data-region-id="${item.regionID}">
+                    <span class="path-number">${index + 1}</span>
+                    <span class="path-name">${item.name}</span>
+                </div>
+            `;
+        });
+        
+        container.innerHTML = html;
+        
+        // 绑定点击事件
+        container.querySelectorAll('.path-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const systemId = parseInt(item.dataset.systemId);
+                const regionId = parseInt(item.dataset.regionId);
+                this._focusOnSystem(regionId, systemId);
+            });
+        });
+        
+        // 滚动到最新
+        container.lastElementChild?.scrollIntoView({ behavior: 'smooth' });
+    };
+    
+    /**
+     * 聚焦到指定系统
+     * @private
+     */
+    RegionalMapApp.prototype._focusOnSystem = function(regionId, systemId) {
+        if (systemId >= 31000000) {
+            const system = dataLoader.systems.getWormhole ? 
+                dataLoader.systems.getWormhole(systemId) : 
+                Array.from(dataLoader.wormholeSystems?.values() || []).find(s => s.id === systemId);
+            if (system) this.selectWormholeSystem(system);
+            return;
+        }
+        
+        this.selectRegion(regionId, systemId, true);
+    };
+    
+    /**
+     * 清除路径
+     */
+    RegionalMapApp.prototype.clearPath = function() {
+        this.pathRecorder.clear();
+        this.updatePathPanel();
+        this.renderer.setPathData([], []);
+        this.showToast('路径已清除');
+    };
+    
+})();

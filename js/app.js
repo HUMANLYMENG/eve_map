@@ -26,6 +26,7 @@ export class RegionalMapApp {
     
     this.currentRegionId = null;
     this.elements = {};
+    this.eveScoutRefreshTimer = null; // EVE Scout 自动刷新定时器
     
     this._bindMethods();
   }
@@ -77,6 +78,9 @@ export class RegionalMapApp {
       
       // 加载 EVE Scout 数据
       this._loadEveScoutData();
+      
+      // 启动每分钟自动刷新 EVE Scout 数据
+      this._startEveScoutAutoRefresh();
       
       // 默认选择星域
       this.selectRegion(DEFAULT_REGION_ID, DEFAULT_SYSTEM_ID, true);
@@ -603,6 +607,40 @@ export class RegionalMapApp {
       this.toast.show('刷新失败: ' + error.message, 'error');
     } finally {
       this.elements.refreshEveScoutBtn?.classList.remove('spinning');
+    }
+  }
+  
+  /**
+   * 启动 EVE Scout 自动刷新（每分钟）
+   */
+  _startEveScoutAutoRefresh() {
+    // 清除已有的定时器
+    if (this.eveScoutRefreshTimer) {
+      clearInterval(this.eveScoutRefreshTimer);
+    }
+    
+    // 每分钟自动刷新
+    this.eveScoutRefreshTimer = setInterval(() => {
+      console.log('[App] 自动刷新 EVE Scout 数据...');
+      this._loadEveScoutData();
+    }, 60 * 1000); // 60秒 = 1分钟
+    
+    console.log('[App] EVE Scout 自动刷新已启动（每分钟）');
+    
+    // 页面卸载时清理定时器
+    window.addEventListener('beforeunload', () => {
+      this._stopEveScoutAutoRefresh();
+    });
+  }
+  
+  /**
+   * 停止 EVE Scout 自动刷新
+   */
+  _stopEveScoutAutoRefresh() {
+    if (this.eveScoutRefreshTimer) {
+      clearInterval(this.eveScoutRefreshTimer);
+      this.eveScoutRefreshTimer = null;
+      console.log('[App] EVE Scout 自动刷新已停止');
     }
   }
   

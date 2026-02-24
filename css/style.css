@@ -984,3 +984,250 @@ body {
     min-width: 70px;
     text-align: center;
 }
+
+/* ==================== 角色面板样式 ==================== */
+.role-panel {
+    padding: 0;
+}
+
+.role-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+}
+
+.role-panel-header h3 {
+    margin: 0;
+}
+
+.role-status-indicator {
+    font-size: 14px;
+    color: var(--text-secondary);
+    transition: color 0.3s;
+}
+
+.role-status-indicator.active {
+    color: var(--accent-green);
+    text-shadow: 0 0 8px rgba(90, 199, 90, 0.5);
+}
+
+.role-status-indicator.error {
+    color: var(--accent-red);
+}
+
+.role-controls {
+    margin-bottom: 16px;
+}
+
+.role-select-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.role-select-row label {
+    font-size: 12px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+.role-select {
+    flex: 1;
+    padding: 6px 10px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--text-primary);
+    font-size: 13px;
+    outline: none;
+}
+
+.role-select:hover,
+.role-select:focus {
+    border-color: var(--accent-blue);
+}
+
+.role-select:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.role-buttons {
+    display: flex;
+    gap: 8px;
+}
+
+.role-buttons button {
+    flex: 1;
+    padding: 8px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+    border: 1px solid transparent;
+}
+
+.btn-primary {
+    background: rgba(90, 143, 199, 0.2);
+    border-color: var(--accent-blue);
+    color: var(--accent-blue);
+}
+
+.btn-primary:hover:not(:disabled) {
+    background: rgba(90, 143, 199, 0.3);
+}
+
+.btn-primary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.btn-danger {
+    background: rgba(199, 90, 90, 0.2);
+    border-color: var(--accent-red);
+    color: var(--accent-red);
+}
+
+.btn-danger:hover {
+    background: rgba(199, 90, 90, 0.3);
+}
+
+.btn-secondary {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+}
+
+.btn-secondary:hover {
+    border-color: var(--accent-blue);
+    color: var(--text-primary);
+}
+
+.role-current-info {
+    background: rgba(90, 143, 199, 0.05);
+    border: 1px solid rgba(90, 143, 199, 0.2);
+    border-radius: 4px;
+    padding: 12px;
+    margin-bottom: 16px;
+}
+
+.role-current-info .info-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 4px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.role-current-info .info-row:last-child {
+    border-bottom: none;
+}
+
+.role-current-info .info-label {
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+
+.role-current-info .info-value {
+    font-size: 12px;
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+.security-high { color: var(--accent-blue); }
+.security-low { color: var(--accent-orange); }
+.security-null { color: var(--accent-red); }
+
+.role-list-section {
+    margin-bottom: 16px;
+}
+
+.role-list-section h4 {
+    font-size: 11px;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 8px;
+}
+
+.role-list {
+    max-height: 120px;
+    overflow-y: auto;
+}
+
+.role-list-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 4px;
+    margin-bottom: 4px;
+    font-size: 12px;
+}
+
+.role-list-item .role-name {
+    flex: 1;
+    color: var(--text-primary);
+}
+
+.role-list-item .role-name.active {
+    color: var(--accent-green);
+    font-weight: 500;
+}
+
+.role-list-item .role-client {
+    font-size: 10px;
+    padding: 2px 4px;
+    border-radius: 3px;
+    background: var(--bg-primary);
+    color: var(--text-secondary);
+}
+
+.role-list-item .role-client.zh {
+    color: #c78fc7;
+}
+
+.role-list-item .role-following {
+    font-size: 10px;
+    color: var(--accent-green);
+}
+
+.role-log-path {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border-color);
+}
+
+.role-log-path label {
+    display: block;
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+}
+
+.path-row {
+    display: flex;
+    gap: 8px;
+}
+
+.path-row input {
+    flex: 1;
+    padding: 6px 10px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+.path-row input::placeholder {
+    color: var(--text-secondary);
+    opacity: 0.5;
+}
+
+.path-row button {
+    padding: 6px 12px;
+    white-space: nowrap;
+}

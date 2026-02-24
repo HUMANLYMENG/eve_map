@@ -277,6 +277,14 @@ class RegionalMapApp {
             // 加载 EVE Scout 数据（异步，不阻塞）
             this.loadEveScoutData();
             
+            // 启动每分钟自动刷新 EVE Scout 数据
+            this.startEveScoutAutoRefresh();
+            
+            // 初始化角色跟随功能
+            if (typeof this.initRoleFollow === 'function') {
+                this.initRoleFollow();
+            }
+            
             // 默认选择耶舒尔 (Yeeshur) 所在星域并聚焦
             this.selectRegion(10000064, 30005008, true);
             
@@ -309,6 +317,11 @@ class RegionalMapApp {
         
         // 侧面板拖动调整大小
         this.bindResizerEvents();
+        
+        // 页面卸载时清理定时器
+        window.addEventListener('beforeunload', () => {
+            this.stopEveScoutAutoRefresh();
+        });
     }
     
     bindResizerEvents() {
@@ -995,6 +1008,35 @@ class RegionalMapApp {
             this.showToast('刷新失败: ' + error.message, 'error');
         } finally {
             this.elements.refreshEveScoutBtn.classList.remove('spinning');
+        }
+    }
+    
+    /**
+     * 启动 EVE Scout 自动刷新（每分钟）
+     */
+    startEveScoutAutoRefresh() {
+        // 清除已有的定时器
+        if (this.eveScoutRefreshTimer) {
+            clearInterval(this.eveScoutRefreshTimer);
+        }
+        
+        // 每分钟自动刷新
+        this.eveScoutRefreshTimer = setInterval(() => {
+            console.log('[App] 自动刷新 EVE Scout 数据...');
+            this.loadEveScoutData();
+        }, 60 * 1000); // 60秒 = 1分钟
+        
+        console.log('[App] EVE Scout 自动刷新已启动（每分钟）');
+    }
+    
+    /**
+     * 停止 EVE Scout 自动刷新
+     */
+    stopEveScoutAutoRefresh() {
+        if (this.eveScoutRefreshTimer) {
+            clearInterval(this.eveScoutRefreshTimer);
+            this.eveScoutRefreshTimer = null;
+            console.log('[App] EVE Scout 自动刷新已停止');
         }
     }
     
