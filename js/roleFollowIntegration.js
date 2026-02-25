@@ -356,6 +356,7 @@
      */
     RegionalMapApp.prototype._scanRolesElectron = async function(dirPath) {
         const roles = [];
+        const roleMap = new Map(); // 用于去重，保留最新的
         
         try {
             const result = await window.electronAPI.scanLogDirectory(dirPath);
@@ -365,17 +366,26 @@
                 return roles;
             }
             
+            // 文件已按修改时间排序，遍历去重
             for (const file of result.files) {
                 const listenerMatch = file.content.match(/Listener:\s*(.+)/);
                 if (listenerMatch) {
-                    const isChinese = /频道更换为本地/.test(file.content);
-                    roles.push({
-                        name: listenerMatch[1].trim(),
-                        filePath: file.path,
-                        isChineseClient: isChinese
-                    });
+                    const roleName = listenerMatch[1].trim();
+                    // 只保留第一个（最新的）
+                    if (!roleMap.has(roleName)) {
+                        const isChinese = /频道更换为本地/.test(file.content);
+                        roleMap.set(roleName, {
+                            name: roleName,
+                            filePath: file.path,
+                            isChineseClient: isChinese
+                        });
+                    }
                 }
             }
+            
+            // 转换为数组
+            roles.push(...roleMap.values());
+            
         } catch (e) {
             console.error('[RoleFollow] 扫描角色失败:', e);
         }
@@ -389,28 +399,56 @@
      */
     RegionalMapApp.prototype._scanRolesBrowser = async function(dirHandle) {
         const roles = [];
+        const roleMap = new Map(); // 用于去重，保留最新的
+        const fileEntries = []; // 先收集所有文件条目
         
         try {
+            // 第一步：收集所有文件条目和修改时间
             for await (const [name, handle] of dirHandle.entries()) {
                 if (handle.kind === 'file' && /^(Local|本地)_.+\.txt$/i.test(name)) {
                     try {
                         const file = await handle.getFile();
-                        const content = await file.text();
-                        
-                        const listenerMatch = content.match(/Listener:\s*(.+)/);
-                        if (listenerMatch) {
-                            const isChinese = /频道更换为本地/.test(content);
-                            roles.push({
-                                name: listenerMatch[1].trim(),
-                                fileHandle: handle,
-                                isChineseClient: isChinese
-                            });
-                        }
+                        fileEntries.push({
+                            name: name,
+                            handle: handle,
+                            lastModified: file.lastModified
+                        });
                     } catch (e) {
-                        console.warn('[RoleFollow] 读取文件失败:', name);
+                        console.warn('[RoleFollow] 获取文件信息失败:', name);
                     }
                 }
             }
+            
+            // 按修改时间排序（最新的在前）
+            fileEntries.sort((a, b) => b.lastModified - a.lastModified);
+            
+            // 第二步：遍历去重
+            for (const entry of fileEntries) {
+                try {
+                    const file = await entry.handle.getFile();
+                    const content = await file.text();
+                    
+                    const listenerMatch = content.match(/Listener:\s*(.+)/);
+                    if (listenerMatch) {
+                        const roleName = listenerMatch[1].trim();
+                        // 只保留第一个（最新的）
+                        if (!roleMap.has(roleName)) {
+                            const isChinese = /频道更换为本地/.test(content);
+                            roleMap.set(roleName, {
+                                name: roleName,
+                                fileHandle: entry.handle,
+                                isChineseClient: isChinese
+                            });
+                        }
+                    }
+                } catch (e) {
+                    console.warn('[RoleFollow] 读取文件失败:', entry.name);
+                }
+            }
+            
+            // 转换为数组
+            roles.push(...roleMap.values());
+            
         } catch (e) {
             console.error('[RoleFollow] 扫描角色失败:', e);
         }
@@ -424,6 +462,15 @@
      */
     RegionalMapApp.prototype._updateRoleList = function(roles) {
         const elems = this.rolePanelElements;
+        
+        // 去重：保留最新的角色
+        const roleMap = new Map();
+        for (const role of roles) {
+            if (!roleMap.has(role.name)) {
+                roleMap.set(role.name, role);
+            }
+        }
+        roles = Array.from(roleMap.values());
         
         // 存储角色信息供后续使用
         this.scannedRoles = roles;
@@ -680,7 +727,7 @@
                 const systemMatch = lines[i].match(/Channel changed to Local\s*:\s*(.+)/i) ||
                                    lines[i].match(/频道更换为本地\s*:\s*(.+)/);
                 if (systemMatch) {
-                    const systemName = systemMatch[1].trim().replace(/\*$/, '');
+                    const systemName = systemMatch[1].trim().replace(/\*$/, '').replace(/^：/, '');
                     return this._findSystemByName(systemName);
                 }
             }
@@ -696,21 +743,77 @@
      * @private
      */
     RegionalMapApp.prototype._getCurrentSystemBrowser = async function(role) {
-        if (!role.fileHandle) return null;
+        if (!this.currentLogDirectory) return null;
         
         try {
-            const file = await role.fileHandle.getFile();
-            const content = await file.text();
+            // 重新扫描目录获取该角色的最新日志文件
+            let latestFile = null;
+            let latestTime = 0;
+            let scannedCount = 0;
+            let matchedCount = 0;
             
-            const lines = content.split(/\r?\n/);
-            for (let i = lines.length - 1; i >= 0; i--) {
-                const systemMatch = lines[i].match(/Channel changed to Local\s*:\s*(.+)/i) ||
-                                   lines[i].match(/频道更换为本地\s*:\s*(.+)/);
+            for await (const [name, handle] of this.currentLogDirectory.entries()) {
+                if (handle.kind === 'file' && /^(Local|本地)_\d{8}_.+\.txt$/i.test(name)) {
+                    scannedCount++;
+                    try {
+                        const file = await handle.getFile();
+                        const content = await file.text();
+                        
+                        // 检查是否包含该角色
+                        const listenerMatch = content.match(/Listener:\s*(.+)/);
+                        if (listenerMatch) {
+                            const foundRoleName = listenerMatch[1].trim();
+                            if (foundRoleName === role.name) {
+                                matchedCount++;
+                                console.log('[RoleFollow] 匹配到角色文件:', name, '修改时间:', new Date(file.lastModified));
+                                // 找到该角色的文件，检查是否最新
+                                if (file.lastModified > latestTime) {
+                                    latestTime = file.lastModified;
+                                    latestFile = { handle, content, name };
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        console.warn('[RoleFollow] 读取文件失败:', name);
+                    }
+                }
+            }
+            
+            console.log('[RoleFollow] 扫描完成:', { scannedCount, matchedCount, roleName: role.name });
+            
+            if (!latestFile) {
+                console.warn('[RoleFollow] 未找到角色的最新日志文件');
+                return null;
+            }
+            
+            console.log('[RoleFollow] 使用最新文件:', latestFile.name);
+            
+            // 重新读取最新文件内容（确保获取最新数据）
+            let freshContent;
+            try {
+                const freshFile = await latestFile.handle.getFile();
+                freshContent = await freshFile.text();
+            } catch (e) {
+                console.warn('[RoleFollow] 重新读取文件失败:', e);
+                return null;
+            }
+            
+            const allLines = freshContent.split(/\r?\n/);
+            console.log('[RoleFollow] 文件总行数:', allLines.length);
+            
+            // 从最新文件内容中解析星系
+            for (let i = allLines.length - 1; i >= 0; i--) {
+                const line = allLines[i];
+                const systemMatch = line.match(/Channel changed to Local\s*[:：]\s*(.+)/i) ||
+                                   line.match(/频道更换为本地\s*[:：]\s*(.+)/);
                 if (systemMatch) {
-                    const systemName = systemMatch[1].trim().replace(/\*$/, '');
+                    const systemName = systemMatch[1].trim().replace(/\*$/, '').replace(/^：/, '');
+                    console.log('[RoleFollow] 从日志解析到星系:', systemName);
                     return this._findSystemByName(systemName);
                 }
             }
+            
+            console.warn('[RoleFollow] 日志文件中未找到星系切换记录');
         } catch (e) {
             console.warn('[RoleFollow] 获取当前星系失败:', e);
         }
@@ -844,9 +947,17 @@
     RegionalMapApp.prototype._startFileWatchingBrowser = function(roleName) {
         let lastSystemId = null;
         
+        console.log('[RoleFollow] 开始文件监控:', roleName);
+        
         this._fileWatchTimer = setInterval(async () => {
             const currentSystem = await this._getCurrentSystemFromLog(roleName);
+            console.log('[RoleFollow] 轮询检查:', { 
+                systemName: currentSystem?.name, 
+                systemId: currentSystem?.id, 
+                lastSystemId 
+            });
             if (currentSystem && currentSystem.id !== lastSystemId) {
+                console.log('[RoleFollow] 检测到星系变化:', lastSystemId, '->', currentSystem.id);
                 lastSystemId = currentSystem.id;
                 this._handleSystemChange(currentSystem);
             }
@@ -858,7 +969,7 @@
      * @private
      */
     RegionalMapApp.prototype._handleSystemChange = function(system) {
-        console.log('[RoleFollow] _handleSystemChange:', system.name, 'regionID:', system.regionID);
+        console.log('[RoleFollow] _handleSystemChange:', system.name, 'regionID:', system.regionID, 'isWormhole:', system.isWormhole);
         
         // 添加新星系到路径
         this.pathRecorder.addSystem(system);
@@ -868,9 +979,19 @@
             this.pathRecorder.getDisplayConnections()
         );
         
-        // 切换到新星系所在星域并选中该星系
-        console.log('[RoleFollow] 切换到星域:', system.regionID, '选中星系:', system.id);
-        this.selectRegion(system.regionID, system.id, true);
+        // 检查是否是虫洞星系（J-space）
+        const isWormhole = system.isWormhole || system.id >= 31000000 || 
+                          dataLoader.wormholeSystems.has(system.id);
+        
+        if (isWormhole) {
+            // 虫洞星系：添加到当前视图为外部系统，不切换星域
+            console.log('[RoleFollow] 进入虫洞星系，添加到当前视图');
+            this._addWormholeToView(system);
+        } else {
+            // K-Space 星系：切换到对应星域
+            console.log('[RoleFollow] 切换到星域:', system.regionID, '选中星系:', system.id);
+            this.selectRegion(system.regionID, system.id, true);
+        }
         
         // 检测虫洞连接（无星门连接）- 延迟执行确保地图已渲染
         setTimeout(() => {
@@ -894,30 +1015,126 @@
     };
     
     /**
+     * 将虫洞星系添加到当前视图
+     * @private
+     */
+    RegionalMapApp.prototype._addWormholeToView = function(wormholeSystem) {
+        // 获取当前星域数据
+        const currentData = this.renderer.currentData;
+        if (!currentData) return;
+        
+        // 检查虫洞是否已在外部系统中
+        const existingExternal = currentData.externalSystems.find(s => s.id === wormholeSystem.id);
+        if (existingExternal) {
+            // 已存在，直接选中
+            this.renderer.setSelectedSystem(existingExternal);
+            this.updateSystemInfo(existingExternal);
+            this.renderer.centerOnSystem(existingExternal);
+            return;
+        }
+        
+        // 创建外部系统对象（虫洞显示在当前星域边缘）
+        const externalWormhole = {
+            ...wormholeSystem,
+            isExternal: true,
+            // 计算位置：放在地图右侧边缘中间
+            x: currentData.bounds.maxX + 200,
+            y: (currentData.bounds.minY + currentData.bounds.maxY) / 2
+        };
+        
+        // 添加到外部系统列表
+        currentData.externalSystems.push(externalWormhole);
+        
+        // 重新设置数据（触发重绘）
+        this.renderer.setData(currentData, true);
+        
+        // 选中新添加的虫洞
+        setTimeout(() => {
+            this.renderer.setSelectedSystem(externalWormhole);
+            this.updateSystemInfo(externalWormhole);
+            this.renderer.centerOnSystem(externalWormhole);
+        }, 100);
+    };
+    
+    /**
      * 从日志获取当前星系（浏览器环境）
      * @private
      */
     RegionalMapApp.prototype._getCurrentSystemFromLog = async function(roleName) {
-        if (!this.currentLogDirectory) return null;
-        
-        const role = this.scannedRoles?.find(r => r.name === roleName);
-        if (!role || !role.fileHandle) return null;
+        if (!this.currentLogDirectory) {
+            console.warn('[RoleFollow] 轮询: currentLogDirectory 为空');
+            return null;
+        }
         
         try {
-            const file = await role.fileHandle.getFile();
-            const content = await file.text();
+            // 重新扫描目录获取该角色的最新日志文件
+            let latestFile = null;
+            let latestTime = 0;
+            let scannedCount = 0;
+            let matchedCount = 0;
             
+            for await (const [name, handle] of this.currentLogDirectory.entries()) {
+                if (handle.kind === 'file' && /^(Local|本地)_\d{8}_.+\.txt$/i.test(name)) {
+                    scannedCount++;
+                    try {
+                        const file = await handle.getFile();
+                        const content = await file.text();
+                        
+                        // 检查是否包含该角色
+                        const listenerMatch = content.match(/Listener:\s*(.+)/);
+                        if (listenerMatch) {
+                            const foundRoleName = listenerMatch[1].trim();
+                            if (foundRoleName === roleName) {
+                                matchedCount++;
+                                // 找到该角色的文件，检查是否最新
+                                if (file.lastModified > latestTime) {
+                                    latestTime = file.lastModified;
+                                    latestFile = { handle, content, name };
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        console.warn('[RoleFollow] 轮询: 读取文件失败:', name);
+                    }
+                }
+            }
+            
+            console.log('[RoleFollow] 轮询扫描:', { scannedCount, matchedCount, hasLatestFile: !!latestFile });
+            
+            if (!latestFile) {
+                console.warn('[RoleFollow] 轮询: 未找到角色文件');
+                return null;
+            }
+            
+            // 重新读取最新文件内容（文件可能已更新）
+            let content;
+            try {
+                const freshFile = await latestFile.handle.getFile();
+                content = await freshFile.text();
+                console.log('[RoleFollow] 轮询: 重新读取文件，大小', content.length);
+            } catch (e) {
+                console.warn('[RoleFollow] 轮询: 重新读取文件失败', e);
+                return null;
+            }
+            
+            // 从最新文件内容中解析星系
             const lines = content.split(/\r?\n/);
+            console.log('[RoleFollow] 轮询: 文件行数', lines.length);
+            
             for (let i = lines.length - 1; i >= 0; i--) {
-                const systemMatch = lines[i].match(/Channel changed to Local\s*:\s*(.+)/i) ||
-                                   lines[i].match(/频道更换为本地\s*:\s*(.+)/);
+                const line = lines[i];
+                const systemMatch = line.match(/Channel changed to Local\s*:\s*(.+)/i) ||
+                                   line.match(/频道更换为本地\s*[:：]\s*(.+)/);
                 if (systemMatch) {
-                    const systemName = systemMatch[1].trim().replace(/\*$/, '');
+                    const systemName = systemMatch[1].trim().replace(/\*$/, '').replace(/^：/, '');
+                    console.log('[RoleFollow] 轮询: 解析到星系', systemName);
                     return this._findSystemByName(systemName);
                 }
             }
+            
+            console.warn('[RoleFollow] 轮询: 未找到星系记录');
         } catch (e) {
-            console.warn('[RoleFollow] 读取文件失败:', e);
+            console.warn('[RoleFollow] 轮询: 异常', e);
         }
         
         return null;
@@ -960,6 +1177,7 @@
         };
         
         // 直接查找（不区分大小写）- 同时匹配 name(中文)、nameEn(英文) 和 nameZh(中文备用)
+        // 先在普通星系中查找
         for (const system of dataLoader.systems.values()) {
             const sysName = (system.name || '').trim();
             const sysNameEn = (system.nameEn || '').trim();
@@ -969,6 +1187,18 @@
                 sysNameEn.toLowerCase() === lowerName || 
                 sysNameZh === cleanName) {
                 console.log('[RoleFollow] 找到星系:', system.name, 'regionID:', system.regionID);
+                return system;
+            }
+        }
+        
+        // 在虫洞星系中查找（虫洞名称通常是 J###### 格式）
+        for (const system of dataLoader.wormholeSystems.values()) {
+            const sysName = (system.name || '').trim();
+            const sysNameEn = (system.nameEn || '').trim();
+            
+            if (sysName.toLowerCase() === lowerName || 
+                sysNameEn.toLowerCase() === lowerName) {
+                console.log('[RoleFollow] 找到虫洞星系:', system.name, 'regionID:', system.regionID);
                 return system;
             }
         }

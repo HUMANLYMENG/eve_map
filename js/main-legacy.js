@@ -678,10 +678,13 @@ class RegionalMapApp {
     
     onSystemHover(system) {
         // 可以在这里添加悬停提示
+        const canvas = this.mapRenderer?.canvas;
+        if (!canvas) return;
+        
         if (system && system.isExternal) {
-            this.elements.canvas.style.cursor = 'pointer';
+            canvas.style.cursor = 'pointer';
         } else {
-            this.elements.canvas.style.cursor = 'default';
+            canvas.style.cursor = 'default';
         }
     }
     
