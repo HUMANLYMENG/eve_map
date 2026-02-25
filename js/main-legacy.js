@@ -697,21 +697,21 @@ class RegionalMapApp {
         // 如果点击的是虫洞星系，切换到虫洞视图
         if (system.isWormhole || system.id >= 31000000) {
             this.selectWormholeSystem(system);
-            // 记录到路径
-            this.pathRecorder.addSystem(system);
-            this.updatePathPanel();
-            this.renderer.setPathData(this.pathRecorder.getDisplayPath(), this.pathRecorder.getDisplayConnections());
-            this.detectWormholes();
+            // 注：点击不再自动记录路径，仅通过角色跟随记录
+            // this.pathRecorder.addSystem(system);
+            // this.updatePathPanel();
+            // this.renderer.setPathData(this.pathRecorder.getDisplayPath(), this.pathRecorder.getDisplayConnections());
+            // this.detectWormholes();
             return;
         }
         
-        // 记录到路径
-        this.pathRecorder.addSystem(system);
-        this.updatePathPanel();
-        this.renderer.setPathData(this.pathRecorder.getDisplayPath(), this.pathRecorder.getDisplayConnections());
+        // 注：点击不再自动记录路径，仅通过角色跟随记录
+        // this.pathRecorder.addSystem(system);
+        // this.updatePathPanel();
+        // this.renderer.setPathData(this.pathRecorder.getDisplayPath(), this.pathRecorder.getDisplayConnections());
         
         // 检测新形成的虫洞连接
-        this.detectWormholes();
+        // this.detectWormholes();
         
         // 如果点击的是外部星系，跳转到该星域并选中该星系（居中显示）
         if (system.isExternal) {
