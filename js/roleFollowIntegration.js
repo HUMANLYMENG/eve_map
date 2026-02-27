@@ -567,14 +567,16 @@
         // 获取当前星系
         let currentSystem = null;
         
-        // 根据角色存储的数据类型判断使用哪种方式
-        if (role.filePath) {
+        // 根据环境判断使用哪种方式
+        if (this.isElectron) {
+            console.log('[RoleFollow] 使用 Electron 方式获取当前星系');
+            currentSystem = await this._getCurrentSystemElectron(role);
+        } else if (role.filePath) {
             // Python 桥接方式 - 使用 filePath
             console.log('[RoleFollow] 使用 Python 桥接方式获取当前星系');
             currentSystem = await this._getCurrentSystemPython(role);
-        } else if (this.isElectron) {
-            currentSystem = await this._getCurrentSystemElectron(role);
         } else if (role.fileHandle) {
+            console.log('[RoleFollow] 使用浏览器方式获取当前星系');
             currentSystem = await this._getCurrentSystemBrowser(role);
         }
         
@@ -713,19 +715,38 @@
      */
     RegionalMapApp.prototype._getCurrentSystemElectron = async function(role) {
         try {
-            const result = await window.electronAPI.readLogFile(role.filePath);
+            // 获取日志目录（从 filePath 提取目录）
+            const dirPath = role.filePath.substring(0, role.filePath.lastIndexOf('\\') || role.filePath.lastIndexOf('/'));
             
-            if (!result.success) {
-                console.warn('[RoleFollow] 读取日志失败:', result.error);
+            // 重新扫描目录获取该角色的最新日志文件
+            const scanResult = await window.electronAPI.scanLogDirectory(dirPath);
+            if (!scanResult.success) {
+                console.warn('[RoleFollow] 扫描目录失败:', scanResult.error);
                 return null;
             }
             
-            const content = result.content;
+            // 按修改时间排序，找到该角色的最新文件
+            let latestFile = null;
+            for (const file of scanResult.files) {
+                const listenerMatch = file.content.match(/Listener:\s*(.+)/);
+                if (listenerMatch && listenerMatch[1].trim() === role.name) {
+                    if (!latestFile || file.name > latestFile.name) {
+                        latestFile = file;
+                    }
+                }
+            }
+            
+            if (!latestFile) {
+                console.warn('[RoleFollow] 未找到角色的最新日志文件');
+                return null;
+            }
+            
+            const content = latestFile.content;
             const lines = content.split(/\r?\n/);
             
             for (let i = lines.length - 1; i >= 0; i--) {
-                const systemMatch = lines[i].match(/Channel changed to Local\s*:\s*(.+)/i) ||
-                                   lines[i].match(/频道更换为本地\s*:\s*(.+)/);
+                const systemMatch = lines[i].match(/Channel changed to Local\s*[:：]\s*(.+)/i) ||
+                                   lines[i].match(/频道更换为本地\s*[:：]\s*(.+)/);
                 if (systemMatch) {
                     const systemName = systemMatch[1].trim().replace(/\*$/, '').replace(/^：/, '');
                     return this._findSystemByName(systemName);
@@ -867,14 +888,16 @@
         const role = this.scannedRoles?.find(r => r.name === roleName);
         if (!role) return;
         
-        // 根据角色存储的数据类型判断使用哪种方式
-        if (role.filePath) {
+        // 根据环境判断使用哪种方式（Electron 优先）
+        if (this.isElectron) {
+            console.log('[RoleFollow] 使用 Electron 方式监控文件');
+            await this._startFileWatchingElectron(roleName);
+        } else if (role.filePath) {
             // Python 桥接方式
             console.log('[RoleFollow] 使用 Python 桥接方式监控文件');
             this._startFileWatchingPython(roleName);
-        } else if (this.isElectron) {
-            await this._startFileWatchingElectron(roleName);
         } else if (role.fileHandle) {
+            console.log('[RoleFollow] 使用浏览器方式监控文件');
             this._startFileWatchingBrowser(roleName);
         }
     };
@@ -908,36 +931,81 @@
         const role = this.scannedRoles?.find(r => r.name === roleName);
         if (!role) return;
         
-        try {
-            // 先获取一次当前系统作为基准
-            let lastSystem = await this._getCurrentSystemElectron(role);
-            
-            // 设置监听器
-            window.electronAPI.onSystemChange((data) => {
-                if (data.roleName !== roleName) return;
+        console.log('[RoleFollow] Electron 模式使用渲染进程轮询（类似浏览器模式）');
+        
+        // 使用渲染进程轮询，避免 IPC 问题
+        let lastSystem = await this._getCurrentSystemElectron(role);
+        let lastFileContent = null;
+        
+        this._fileWatchTimer = setInterval(async () => {
+            try {
+                // 重新扫描目录获取最新文件（已按修改时间排序）
+                const scanResult = await window.electronAPI.scanLogDirectory(this.currentLogDirectory);
+                if (!scanResult.success) {
+                    console.warn('[RoleFollow] 扫描目录失败:', scanResult.error);
+                    return;
+                }
                 
-                const system = this._findSystemByName(data.systemName);
-                if (system && (!lastSystem || system.id !== lastSystem.id)) {
+                // 文件已按修改时间排序，第一个匹配的角色文件就是最新的
+                let latestFile = null;
+                for (const file of scanResult.files) {
+                    const listenerMatch = file.content.match(/Listener:\s*(.+)/);
+                    if (listenerMatch && listenerMatch[1].trim() === roleName) {
+                        latestFile = file;
+                        break; // 第一个匹配的就是最新的（已排序）
+                    }
+                }
+                
+                if (!latestFile) {
+                    console.log('[RoleFollow] 未找到角色文件:', roleName);
+                    return;
+                }
+                
+                // 如果文件内容与上次相同，跳过解析
+                if (latestFile.content === lastFileContent) {
+                    return; // 文件未变化，跳过
+                }
+                
+                console.log('[RoleFollow] 检测到文件变化，解析最新星系');
+                lastFileContent = latestFile.content;
+                
+                // 从最新文件内容中解析星系（最后一行）
+                const lines = latestFile.content.split(/\r?\n/);
+                let currentSystemName = null;
+                
+                for (let i = lines.length - 1; i >= 0; i--) {
+                    const systemMatch = lines[i].match(/Channel changed to Local\s*[:：]\s*(.+)/i) ||
+                                       lines[i].match(/频道更换为本地\s*[:：]\s*(.+)/);
+                    if (systemMatch) {
+                        currentSystemName = systemMatch[1].trim().replace(/\*$/, '').replace(/^：/, '');
+                        break; // 找到最后一行（最新的）星系记录
+                    }
+                }
+                
+                if (!currentSystemName) {
+                    console.log('[RoleFollow] 未找到星系记录');
+                    return;
+                }
+                
+                const system = this._findSystemByName(currentSystemName);
+                
+                if (!system) {
+                    console.warn('[RoleFollow] 找不到星系:', currentSystemName);
+                    return;
+                }
+                
+                // 检查星系是否变化
+                if (!lastSystem || system.id !== lastSystem.id) {
+                    console.log('[RoleFollow] 检测到星系变化:', lastSystem?.name, '->', system.name);
                     lastSystem = system;
                     this._handleSystemChange(system);
+                } else {
+                    console.log('[RoleFollow] 星系未变化:', system.name);
                 }
-            });
-            
-            // 启动监控
-            const result = await window.electronAPI.startWatching(
-                this.currentLogDirectory,
-                roleName
-            );
-            
-            if (result.success) {
-                this.currentWatchId = result.watchId;
+            } catch (e) {
+                console.warn('[RoleFollow] 轮询检查失败:', e);
             }
-            
-        } catch (e) {
-            console.error('[RoleFollow] 启动监控失败:', e);
-            // 降级到轮询
-            this._startFileWatchingBrowser(roleName);
-        }
+        }, 1000);
     };
     
     /**

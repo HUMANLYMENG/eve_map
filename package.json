@@ -38,6 +38,7 @@
     },
     "files": [
       "index.html",
+      "main-electron.cjs",
       "css/**/*",
       "js/**/*",
       "data/**/*",
@@ -53,16 +54,8 @@
     "win": {
       "target": [
         {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        },
-        {
-          "target": "portable",
-          "arch": [
-            "x64"
-          ]
+          "target": "dir",
+          "arch": ["x64"]
         }
       ],
       "icon": "assets/icon.ico"
@@ -86,6 +79,9 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true
+    },
+    "electronDownload": {
+      "mirror": "https://npmmirror.com/mirrors/electron/"
     }
   }
 }

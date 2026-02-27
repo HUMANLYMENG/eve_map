@@ -122,17 +122,22 @@ ipcMain.handle('scan-log-directory', async (event, dirPath) => {
       if (entry.isFile() && /^(Local|本地)_.+\.txt$/i.test(entry.name)) {
         const filePath = path.join(dirPath, entry.name);
         try {
+          const stats = await fs.stat(filePath);
           const content = await readEveLogFile(filePath);
           logFiles.push({
             name: entry.name,
             path: filePath,
-            content: content
+            content: content,
+            mtime: stats.mtime.getTime()
           });
         } catch (err) {
           console.warn(`[Main] 读取文件失败: ${entry.name}`, err.message);
         }
       }
     }
+    
+    // 按修改时间排序（最新的在前）
+    logFiles.sort((a, b) => b.mtime - a.mtime);
     
     return { success: true, files: logFiles };
   } catch (err) {
@@ -150,6 +155,8 @@ ipcMain.handle('read-log-file', async (event, filePath) => {
 });
 
 ipcMain.handle('start-watching', async (event, dirPath, roleName) => {
+  let lastSystemName = null;
+  
   const watchInterval = setInterval(async () => {
     if (!mainWindow) {
       clearInterval(watchInterval);
@@ -157,31 +164,62 @@ ipcMain.handle('start-watching', async (event, dirPath, roleName) => {
     }
     
     try {
+      // 获取所有文件并按修改时间排序
       const entries = await fs.readdir(dirPath, { withFileTypes: true });
+      const fileEntries = [];
       
       for (const entry of entries) {
         if (entry.isFile() && /^(Local|本地)_.+\.txt$/i.test(entry.name)) {
           const filePath = path.join(dirPath, entry.name);
-          const content = await readEveLogFile(filePath);
+          const stats = await fs.stat(filePath);
+          fileEntries.push({
+            name: entry.name,
+            path: filePath,
+            mtime: stats.mtime
+          });
+        }
+      }
+      
+      // 按修改时间排序（最新的在前）
+      fileEntries.sort((a, b) => b.mtime - a.mtime);
+      
+      // 找该角色的最新文件
+      let latestContent = null;
+      for (const fileEntry of fileEntries) {
+        const content = await readEveLogFile(fileEntry.path);
+        const listenerMatch = content.match(/Listener:\s*(.+)/);
+        if (listenerMatch && listenerMatch[1].trim() === roleName) {
+          latestContent = content;
+          break;
+        }
+      }
+      
+      if (!latestContent) return;
+      
+      // 解析最新星系
+      const lines = latestContent.split(/\r?\n/);
+      for (let i = lines.length - 1; i >= 0; i--) {
+        const systemMatch = lines[i].match(/Channel changed to Local\s*[:：]\s*(.+)/i) ||
+                           lines[i].match(/频道更换为本地\s*[:：]\s*(.+)/);
+        if (systemMatch) {
+          const systemName = systemMatch[1].trim().replace(/\*$/, '').replace(/^：/, '');
           
-          const listenerMatch = content.match(/Listener:\s*(.+)/);
-          if (listenerMatch && listenerMatch[1].trim() === roleName) {
-            const lines = content.split(/\r?\n/);
-            for (let i = lines.length - 1; i >= 0; i--) {
-              const systemMatch = lines[i].match(/Channel changed to Local\s*:\s*(.+)/i) ||
-                                 lines[i].match(/频道更换为本地\s*:\s*(.+)/);
-              if (systemMatch) {
-                const systemName = systemMatch[1].trim().replace(/\*$/, '');
-                mainWindow.webContents.send('system-change', {
-                  roleName,
-                  systemName,
-                  timestamp: Date.now()
-                });
-                break;
-              }
+          // 只有星系变化时才发送事件
+          if (systemName !== lastSystemName) {
+            console.log('[Main] 检测到星系变化:', lastSystemName, '->', systemName);
+            lastSystemName = systemName;
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              console.log('[Main] 发送 system-change 事件到渲染进程');
+              mainWindow.webContents.send('system-change', {
+                roleName,
+                systemName,
+                timestamp: Date.now()
+              });
+            } else {
+              console.warn('[Main] mainWindow 不可用，无法发送事件');
             }
-            break;
           }
+          break;
         }
       }
     } catch (err) {
