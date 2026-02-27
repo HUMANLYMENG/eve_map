@@ -1231,3 +1231,17 @@ body {
     padding: 6px 12px;
     white-space: nowrap;
 }
+
+/* ==================== 水印样式 ==================== */
+.watermark {
+    position: fixed;
+    bottom: 10px;
+    right: 10px;
+    font-size: 11px;
+    color: rgba(136, 128, 128, 0.4);
+    pointer-events: none;
+    user-select: none;
+    z-index: 9999;
+    font-family: monospace;
+    letter-spacing: 1px;
+}
