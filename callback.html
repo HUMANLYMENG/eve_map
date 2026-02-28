@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EVE SSO 回调处理</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: #fff;
+        }
+        
+        .container {
+            text-align: center;
+            padding: 40px;
+        }
+        
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 3px solid rgba(0, 212, 255, 0.3);
+            border-top-color: #00d4ff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        h1 {
+            color: #00d4ff;
+            margin-bottom: 10px;
+        }
+        
+        p {
+            color: #888;
+        }
+        
+        .success {
+            color: #4caf50;
+            font-size: 60px;
+            margin-bottom: 20px;
+        }
+        
+        .error {
+            color: #f44336;
+            font-size: 60px;
+            margin-bottom: 20px;
+        }
+        
+        .details {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 20px;
+            font-family: monospace;
+            font-size: 12px;
+            max-width: 500px;
+            word-break: break-all;
+        }
+    </style>
+</head>
+<body>
+    <div class="container" id="container">
+        <div class="spinner" id="spinner"></div>
+        <h1 id="title">正在处理...</h1>
+        <p id="message">请稍候，正在完成 EVE SSO 认证</p>
+        <div class="details" id="details" style="display: none;"></div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // 解析 URL 参数
+            const urlParams = new URLSearchParams(window.location.search);
+            const code = urlParams.get('code');
+            const state = urlParams.get('state');
+            const error = urlParams.get('error');
+            const errorDescription = urlParams.get('error_description');
+            
+            const container = document.getElementById('container');
+            const spinner = document.getElementById('spinner');
+            const title = document.getElementById('title');
+            const message = document.getElementById('message');
+            const details = document.getElementById('details');
+            
+            // 检查是否有错误
+            if (error) {
+                spinner.style.display = 'none';
+                title.innerHTML = '<div class="error">✗</div>';
+                title.style.color = '#f44336';
+                message.textContent = `认证失败: ${error}`;
+                details.textContent = errorDescription || 'No additional details';
+                details.style.display = 'block';
+                
+                // 发送错误消息给父窗口
+                if (window.opener) {
+                    window.opener.postMessage({
+                        type: 'EVE_AUTH_CALLBACK',
+                        code: null,
+                        state: state,
+                        error: error
+                    }, window.location.origin);
+                }
+                return;
+            }
+            
+            // 检查是否有授权码
+            if (!code) {
+                spinner.style.display = 'none';
+                title.innerHTML = '<div class="error">✗</div>';
+                title.style.color = '#f44336';
+                message.textContent = '未收到授权码';
+                
+                if (window.opener) {
+                    window.opener.postMessage({
+                        type: 'EVE_AUTH_CALLBACK',
+                        code: null,
+                        state: state,
+                        error: 'No authorization code received'
+                    }, window.location.origin);
+                }
+                return;
+            }
+            
+            // 认证成功
+            spinner.style.display = 'none';
+            title.innerHTML = '<div class="success">✓</div>';
+            title.style.color = '#4caf50';
+            message.textContent = '认证成功！正在关闭窗口...';
+            details.textContent = `State: ${state}`;
+            details.style.display = 'block';
+            
+            // 发送成功消息给父窗口
+            if (window.opener) {
+                window.opener.postMessage({
+                    type: 'EVE_AUTH_CALLBACK',
+                    code: code,
+                    state: state,
+                    error: null
+                }, window.location.origin);
+                
+                // 延迟关闭窗口
+                setTimeout(() => {
+                    window.close();
+                }, 1500);
+            } else {
+                message.textContent = '认证成功！请在原页面继续操作。';
+            }
+        });
+    </script>
+</body>
+</html>

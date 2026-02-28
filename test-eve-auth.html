@@ -339,10 +339,10 @@
         const authState = urlParams.get('state');
         const authError = urlParams.get('error');
         
-        // 如果是从 EVE SSO 直接返回（而不是通过回调页面），则重定向到回调页面
-        if ((authCode || authError) && !window.opener) {
-            // 构建回调页面 URL
-            const callbackUrl = new URL('eve-callback.html', window.location.href);
+        // 如果是从 EVE SSO 直接返回到 /callback，则重定向到回调处理页面
+        if ((authCode || authError) && window.location.pathname === '/callback') {
+            // 重定向到回调处理页面
+            const callbackUrl = new URL('callback.html', window.location.origin);
             callbackUrl.search = window.location.search;
             window.location.href = callbackUrl.toString();
         }
@@ -371,9 +371,8 @@
             eveLoginBtn.style.display = 'none';
             
             try {
-                // 修改回调 URL 为本地回调页面
-                const baseUrl = window.location.origin + window.location.pathname.replace('test-eve-auth.html', '');
-                eveAuth.redirectUri = baseUrl + 'eve-callback.html';
+                // 回调 URL 必须与 EVE Developer 配置完全匹配
+                eveAuth.redirectUri = 'http://localhost:8000/callback';
                 
                 // 步骤 1: 生成 PKCE 参数并构建授权 URL
                 log('生成 PKCE 参数...', 'info');
@@ -385,6 +384,7 @@
                 
                 log('打开 EVE 登录页面...', 'info');
                 log(`回调 URL: ${eveAuth.redirectUri}`, 'info');
+                log('正在跳转到 EVE 登录页...', 'pending');
                 
                 // 打开 EVE 登录窗口
                 const popup = window.open(authUrl, 'eve-auth', 'width=800,height=600');

@@ -7,7 +7,7 @@ class EveAuthService {
     constructor() {
         this.clientId = '76334ad33b43464caedc8f611ab78544';
         this.clientSecret = '[REMOVED_EVE_SECRET]';
-        this.redirectUri = 'http://localhost:8000/callback';
+        this.redirectUri = 'http://localhost:8000/callback';  // 必须与 EVE Developer 配置完全匹配
         this.scopes = [
             'publicData',
             'esi-location.read_location.v1',
