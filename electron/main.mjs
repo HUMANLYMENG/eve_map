@@ -264,7 +264,7 @@ function startEveAuthServer() {
     
     // 创建 HTTP 服务器
     eveAuthServer = http.createServer((req, res) => {
-      const url = new URL(req.url, `http://localhost:5525`);
+      const url = new URL(req.url, `http://localhost:8080`);
       const code = url.searchParams.get('code');
       const state = url.searchParams.get('state');
       const error = url.searchParams.get('error');
@@ -303,9 +303,9 @@ function startEveAuthServer() {
       }, 1000);
     });
     
-    // 监听端口 5525
-    eveAuthServer.listen(5525, 'localhost', () => {
-      console.log('[EVE Auth] 回调服务器已启动: http://localhost:5525');
+    // 监听端口 8080
+    eveAuthServer.listen(8080, 'localhost', () => {
+      console.log('[EVE Auth] 回调服务器已启动: http://localhost:8080');
     });
     
     // 设置超时
