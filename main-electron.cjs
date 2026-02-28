@@ -267,7 +267,7 @@ function startEveAuthServer() {
     
     // 创建 HTTP 服务器
     eveAuthServer = http.createServer((req, res) => {
-      const url = new URL(req.url, `http://localhost:5525`);
+      const url = new URL(req.url, `http://localhost:9000`);
       const code = url.searchParams.get('code');
       const state = url.searchParams.get('state');
       const error = url.searchParams.get('error');
@@ -306,9 +306,9 @@ function startEveAuthServer() {
       }, 1000);
     });
     
-    // 监听端口 5525（Electron 专用，避免与浏览器冲突）
-    eveAuthServer.listen(5525, 'localhost', () => {
-      console.log('[EVE Auth] 回调服务器已启动: http://localhost:5525');
+    // 监听端口 9000（Electron 专用，避免与开发服务器冲突）
+    eveAuthServer.listen(9000, 'localhost', () => {
+      console.log('[EVE Auth] 回调服务器已启动: http://localhost:9000');
     });
     
     // 处理启动错误
@@ -337,7 +337,7 @@ function startEveAuthServer() {
 // IPC 处理 - 开始 EVE 认证
 ipcMain.handle('start-eve-auth', async (event, authUrl) => {
   try {
-    // 检查是否有其他程序占用 5525 端口
+    // 检查是否有其他程序占用 9000 端口
     const net = require('net');
     const checkPort = new Promise((resolve) => {
       const tester = net.createServer()
@@ -346,15 +346,15 @@ ipcMain.handle('start-eve-auth', async (event, authUrl) => {
           tester.close();
           resolve(true); // 端口可用
         })
-        .listen(5525, 'localhost');
+        .listen(9000, 'localhost');
     });
     
     const isPortAvailable = await checkPort;
     if (!isPortAvailable) {
-      console.error('[EVE Auth] 端口 5525 被占用');
+      console.error('[EVE Auth] 端口 9000 被占用');
       return { 
         success: false, 
-        error: '端口 5525 被占用，请重启应用后重试。' 
+        error: '端口 9000 被占用，请重启应用后重试。' 
       };
     }
     

@@ -445,7 +445,7 @@ class RegionalMapApp {
                     });
                 } else {
                     // 显示错误提示
-                    if (data.error && data.error.includes('端口 5525')) {
+                    if (data.error && data.error.includes('端口 9000')) {
                         this.showToast(data.error, 'error', 5000);
                         alert(data.error);
                     } else {
@@ -477,16 +477,18 @@ class RegionalMapApp {
             const isElectron = window.electronAPI && window.electronAPI.isElectron;
             
             if (isElectron) {
-                // Electron 环境：使用独立端口 5525
-                this.eveAuth.redirectUri = 'http://localhost:5525/callback';
-                console.log('[EVE Auth] Electron 模式，回调 URL:', this.eveAuth.redirectUri);
+                // Electron 环境：使用端口 9000（避免与开发服务器冲突）
+                this.eveAuth.redirectUri = 'http://localhost:9000/callback';
             } else {
                 // 浏览器环境：使用统一回调 URL
                 this.eveAuth.redirectUri = 'http://localhost:8080/callback';
-                console.log('[EVE Auth] 浏览器模式，回调 URL:', this.eveAuth.redirectUri);
             }
             
+            console.log('[EVE Auth] 回调 URL:', this.eveAuth.redirectUri);
+            
             const authUrl = await this.eveAuth.buildAuthUrl();
+            
+            console.log('[EVE Auth] 完整授权 URL:', authUrl);
             
             console.log('[EVE Auth] 授权 URL:', authUrl);
             
