@@ -445,8 +445,9 @@ class RegionalMapApp {
         this.eveAuth = new EveAuthService();
         
         try {
-            // 回调 URL 必须与 EVE Developer 配置完全匹配
-            this.eveAuth.redirectUri = 'http://localhost:8000/callback';
+            // 使用当前页面 origin作为回调URL
+            const currentOrigin = window.location.origin;
+            this.eveAuth.redirectUri = currentOrigin + '/callback.html';
             
             const authUrl = await this.eveAuth.buildAuthUrl();
             
