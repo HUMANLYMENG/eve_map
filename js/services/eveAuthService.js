@@ -244,8 +244,15 @@ class EveAuthService {
             
             console.log('[EVE Auth] JWT 解码:', decoded);
             
-            // character_id 在 sub 字段
-            return decoded.sub;
+            // EVE 的 JWT 中 sub 字段格式为: CHARACTER:EVE:12345678
+            // 需要提取数字部分
+            const sub = decoded.sub;
+            const match = sub.match(/(\d+)$/);
+            if (!match) {
+                throw new Error(`Invalid character ID format: ${sub}`);
+            }
+            
+            return parseInt(match[1], 10);
         } catch (e) {
             console.error('[EVE Auth] JWT 解码失败:', e);
             throw new Error('Failed to decode JWT token');
