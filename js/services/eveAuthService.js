@@ -230,11 +230,26 @@ class EveAuthService {
             throw new Error('No access token available');
         }
         
-        // JWT 格式: header.payload.signature
-        const payload = this.tokens.access_token.split('.')[1];
-        const decoded = JSON.parse(atob(payload));
-        
-        return decoded.sub; // character_id 在 sub 字段
+        try {
+            // JWT 格式: header.payload.signature
+            const parts = this.tokens.access_token.split('.');
+            if (parts.length !== 3) {
+                throw new Error('Invalid JWT format');
+            }
+            
+            // base64url 解码 (EVE 使用 base64url)
+            const payload = parts[1];
+            const base64 = payload.replace(/-/g, '+').replace(/_/g, '/');
+            const decoded = JSON.parse(atob(base64));
+            
+            console.log('[EVE Auth] JWT 解码:', decoded);
+            
+            // character_id 在 sub 字段
+            return decoded.sub;
+        } catch (e) {
+            console.error('[EVE Auth] JWT 解码失败:', e);
+            throw new Error('Failed to decode JWT token');
+        }
     }
 
     /**
@@ -243,18 +258,26 @@ class EveAuthService {
     async getCharacterInfo() {
         const characterId = this.getCharacterIdFromToken();
         
-        const response = await fetch(`https://esi.evetech.net/v5/characters/${characterId}/`, {
+        console.log('[EVE Auth] 查询角色 ID:', characterId);
+        
+        const url = `https://esi.evetech.net/v5/characters/${characterId}/`;
+        
+        const response = await fetch(url, {
             headers: {
                 'Accept': 'application/json'
             }
         });
         
         if (!response.ok) {
-            throw new Error(`Failed to fetch character info: ${response.status}`);
+            const errorText = await response.text();
+            console.error('[EVE Auth] ESI 错误:', response.status, errorText);
+            throw new Error(`Failed to fetch character info: ${response.status} - ${errorText}`);
         }
         
         const info = await response.json();
         info.character_id = characterId;
+        
+        console.log('[EVE Auth] 角色信息:', info);
         
         return info;
     }
