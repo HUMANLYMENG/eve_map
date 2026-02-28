@@ -218,6 +218,34 @@
         .btn-secondary:hover {
             background: rgba(255, 255, 255, 0.2);
         }
+        
+        /* Alliance Status */
+        .alliance-status {
+            display: inline-block;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: bold;
+            text-align: center;
+        }
+        
+        .alliance-status.verified {
+            background: linear-gradient(135deg, #4caf50, #45a049);
+            color: #fff;
+            box-shadow: 0 2px 10px rgba(76, 175, 80, 0.3);
+        }
+        
+        .alliance-status.rejected {
+            background: linear-gradient(135deg, #f44336, #d32f2f);
+            color: #fff;
+            box-shadow: 0 2px 10px rgba(244, 67, 54, 0.3);
+        }
+        
+        .alliance-status.no-alliance {
+            background: rgba(255, 152, 0, 0.2);
+            color: #ff9800;
+            border: 1px solid #ff9800;
+        }
 
         /* Loading */
         .loading {
@@ -280,6 +308,11 @@
                 </div>
             </div>
             
+            <!-- 联盟检测标签 -->
+            <div id="allianceBadge" style="margin-bottom: 15px; display: none;">
+                <span id="allianceStatus" class="alliance-status">检测中...</span>
+            </div>
+            
             <div class="character-details">
                 <div class="detail-item">
                     <div class="detail-label">种族</div>
@@ -294,14 +327,18 @@
                     <div class="detail-value" id="gender">-</div>
                 </div>
                 <div class="detail-item">
-                    <div class="detail-label">军团ID</div>
-                    <div class="detail-value" id="corporation">-</div>
-                </div>
-                <div class="detail-item">
                     <div class="detail-label">安全等级</div>
                     <div class="detail-value" id="securityStatus">-</div>
                 </div>
-                <div class="detail-item">
+                <div class="detail-item" style="grid-column: span 2;">
+                    <div class="detail-label">军团</div>
+                    <div class="detail-value" id="corporation">-</div>
+                </div>
+                <div class="detail-item" style="grid-column: span 2;">
+                    <div class="detail-label">联盟</div>
+                    <div class="detail-value" id="alliance">-</div>
+                </div>
+                <div class="detail-item" style="grid-column: span 2;">
                     <div class="detail-label">创建日期</div>
                     <div class="detail-value" id="birthday">-</div>
                 </div>
@@ -472,9 +509,40 @@
             document.getElementById('race').textContent = getRaceName(info.race_id);
             document.getElementById('bloodline').textContent = getBloodlineName(info.bloodline_id);
             document.getElementById('gender').textContent = info.gender === 'male' ? '男性' : '女性';
-            document.getElementById('corporation').textContent = info.corporation_id;
             document.getElementById('securityStatus').textContent = info.security_status?.toFixed(2) || 'N/A';
             document.getElementById('birthday').textContent = new Date(info.birthday).toLocaleDateString('zh-CN');
+            
+            // 显示军团信息
+            const corpName = info.corporation?.name || `Unknown (${info.corporation_id})`;
+            const corpTicker = info.corporation?.ticker ? `[${info.corporation.ticker}]` : '';
+            document.getElementById('corporation').textContent = `${corpName} ${corpTicker}`.trim();
+            
+            // 显示联盟信息和检测状态
+            const allianceBadge = document.getElementById('allianceBadge');
+            const allianceStatus = document.getElementById('allianceStatus');
+            allianceBadge.style.display = 'block';
+            
+            if (info.alliance) {
+                const allianceName = info.alliance.name || `Unknown (${info.corporation.alliance_id})`;
+                const allianceTicker = info.alliance.ticker ? `[${info.alliance.ticker}]` : '';
+                document.getElementById('alliance').textContent = `${allianceName} ${allianceTicker}`.trim();
+                
+                // 检测联盟ID是否是 495729389
+                if (info.is_target_alliance) {
+                    allianceStatus.textContent = '✓ 验证通过 - 目标联盟';
+                    allianceStatus.className = 'alliance-status verified';
+                    log('✓ 角色所在联盟ID 495729389 验证通过!', 'success');
+                } else {
+                    allianceStatus.textContent = `✗ 非目标联盟 (ID: ${info.corporation.alliance_id})`;
+                    allianceStatus.className = 'alliance-status rejected';
+                    log(`✗ 非目标联盟 (ID: ${info.corporation.alliance_id})`, 'error');
+                }
+            } else {
+                document.getElementById('alliance').textContent = '无联盟';
+                allianceStatus.textContent = '✗ 无联盟';
+                allianceStatus.className = 'alliance-status no-alliance';
+                log('✗ 角色无联盟', 'error');
+            }
             
             characterCard.classList.add('show');
             actions.style.display = 'flex';

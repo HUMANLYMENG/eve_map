@@ -267,26 +267,86 @@ class EveAuthService {
         
         console.log('[EVE Auth] 查询角色 ID:', characterId);
         
-        const url = `https://esi.evetech.net/v5/characters/${characterId}/`;
+        // 1. 获取角色基本信息
+        const charUrl = `https://esi.evetech.net/v5/characters/${characterId}/`;
+        const charResponse = await fetch(charUrl, {
+            headers: { 'Accept': 'application/json' }
+        });
+        
+        if (!charResponse.ok) {
+            const errorText = await charResponse.text();
+            console.error('[EVE Auth] ESI 错误:', charResponse.status, errorText);
+            throw new Error(`Failed to fetch character info: ${charResponse.status} - ${errorText}`);
+        }
+        
+        const info = await charResponse.json();
+        info.character_id = characterId;
+        
+        // 2. 获取军团信息
+        if (info.corporation_id) {
+            try {
+                const corpInfo = await this.getCorporationInfo(info.corporation_id);
+                info.corporation = corpInfo;
+            } catch (e) {
+                console.warn('[EVE Auth] 获取军团信息失败:', e.message);
+                info.corporation = { name: 'Unknown', id: info.corporation_id };
+            }
+        }
+        
+        // 3. 获取联盟信息
+        if (info.corporation?.alliance_id) {
+            try {
+                const allianceInfo = await this.getAllianceInfo(info.corporation.alliance_id);
+                info.alliance = allianceInfo;
+                
+                // 检测联盟ID是否是 495729389
+                info.is_target_alliance = info.corporation.alliance_id === 495729389;
+            } catch (e) {
+                console.warn('[EVE Auth] 获取联盟信息失败:', e.message);
+                info.alliance = { name: 'Unknown', id: info.corporation.alliance_id };
+                info.is_target_alliance = false;
+            }
+        } else {
+            info.is_target_alliance = false;
+        }
+        
+        console.log('[EVE Auth] 角色完整信息:', info);
+        
+        return info;
+    }
+    
+    /**
+     * 获取军团信息
+     */
+    async getCorporationInfo(corporationId) {
+        const url = `https://esi.evetech.net/v5/corporations/${corporationId}/`;
         
         const response = await fetch(url, {
-            headers: {
-                'Accept': 'application/json'
-            }
+            headers: { 'Accept': 'application/json' }
         });
         
         if (!response.ok) {
-            const errorText = await response.text();
-            console.error('[EVE Auth] ESI 错误:', response.status, errorText);
-            throw new Error(`Failed to fetch character info: ${response.status} - ${errorText}`);
+            throw new Error(`Failed to fetch corporation info: ${response.status}`);
         }
         
-        const info = await response.json();
-        info.character_id = characterId;
+        return response.json();
+    }
+    
+    /**
+     * 获取联盟信息
+     */
+    async getAllianceInfo(allianceId) {
+        const url = `https://esi.evetech.net/v5/alliances/${allianceId}/`;
         
-        console.log('[EVE Auth] 角色信息:', info);
+        const response = await fetch(url, {
+            headers: { 'Accept': 'application/json' }
+        });
         
-        return info;
+        if (!response.ok) {
+            throw new Error(`Failed to fetch alliance info: ${response.status}`);
+        }
+        
+        return response.json();
     }
 
     /**
