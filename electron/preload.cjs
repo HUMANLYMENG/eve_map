@@ -39,7 +39,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   
   // 检查是否在 Electron 环境中运行
-  isElectron: true
+  isElectron: true,
+  
+  // EVE SSO 认证
+  startEveAuth: (authUrl) => ipcRenderer.invoke('start-eve-auth', authUrl),
+  onEveAuthCallback: (callback) => {
+    ipcRenderer.on('eve-auth-callback', (event, data) => callback(data));
+  }
 });
 
 // 为了兼容性，也暴露一个 nodeModules 对象
