@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; connect-src 'self' https://api.eve-scout.com https://nvwmogsgkbllkxebvzcg.supabase.co wss://nvwmogsgkbllkxebvzcg.supabase.co https://cdn.jsdelivr.net https://esi.evetech.net https://login.eveonline.com; img-src 'self' https://images.evetech.net;">
+    <title>EVE Regional Map - Eveeye Style</title>
+  <link rel="stylesheet" crossorigin href="/assets/index-BQtACu--.css">
+</head>
+<body>
+    <div id="app">
+        <!-- 顶部标题栏 -->
+        <header class="header">
+            <div class="header-left">
+                <div class="logo">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"/>
+                        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+                        <path d="M2 12h20"/>
+                    </svg>
+                </div>
+                <div class="title-group">
+                    <h1>EVE Regional Map</h1>
+                    <span class="subtitle">星域导航</span>
+                </div>
+                
+                <!-- EVE 登录按钮 / 认证状态 -->
+                <div id="eve-auth-container" class="eve-auth-container">
+                    <a href="#" id="eveLoginBtn" class="eve-login-btn" title="Login with EVE Online">
+                        <img src="https://web.ccpgamescdn.com/eveonlineassets/developers/eve-sso-login-black-large.png" 
+                             alt="Login with EVE Online">
+                    </a>
+                    <div id="eve-auth-status" class="eve-auth-status" style="display: none;">
+                        <img id="eve-auth-avatar" src="" alt="">
+                        <div class="eve-auth-info">
+                            <span id="eve-auth-name"></span>
+                            <span id="eve-auth-tag" class="eve-auth-tag">已认证</span>
+                        </div>
+                        <button id="eve-logout-btn" class="eve-logout-btn" title="退出登录">✕</button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 星域选择器 -->
+            <div class="region-selector">
+                <select id="regionSelect">
+                    <option value="">选择星域...</option>
+                </select>
+            </div>
+
+            <!-- 星系搜索 -->
+            <div class="system-search">
+                <input type="text" id="searchInput" placeholder="搜索星系..." autocomplete="off">
+                <div id="searchResults" class="search-results"></div>
+            </div>
+
+            <!-- 图例 -->
+            <div class="legend">
+                <div class="legend-item">
+                    <span class="dot high-sec"></span>
+                    <span>高安 (≥0.5)</span>
+                </div>
+                <div class="legend-item">
+                    <span class="dot low-sec"></span>
+                    <span>低安 (0.1-0.4)</span>
+                </div>
+                <div class="legend-item">
+                    <span class="dot null-sec"></span>
+                    <span>00区 (&lt;0.1)</span>
+                </div>
+                <div class="legend-item">
+                    <span class="dot border"></span>
+                    <span>入口星系</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- 主内容区 -->
+        <main class="main-content">
+            <!-- 地图容器 -->
+            <div id="mapContainer" class="map-container">
+                <canvas id="mapCanvas"></canvas>
+                
+                <!-- 加载遮罩 -->
+                <div id="loadingMask" class="loading-mask">
+                    <div class="spinner"></div>
+                    <p>加载星图数据...</p>
+                </div>
+
+                <!-- 提示信息 -->
+                <div id="toast" class="toast"></div>
+            </div>
+
+            <!-- 拖动分隔条 -->
+            <div class="resizer" id="panelResizer"></div>
+
+            <!-- 右侧面板 -->
+            <aside class="side-panel" id="sidePanel">
+                <!-- 星系信息 -->
+                <div class="panel-section" id="systemInfo">
+                    <h3>星系信息</h3>
+                    <div class="info-content">
+                        <p class="placeholder">悬停或点击星系查看详情</p>
+                    </div>
+                </div>
+
+                <!-- 虫洞记录 -->
+                <div class="panel-section" id="wormholePanel">
+                    <h3>虫洞记录</h3>
+                    <div class="wormhole-table">
+                        <p class="placeholder">暂无虫洞记录</p>
+                    </div>
+                </div>
+
+                <!-- 角色跟随 -->
+                <div class="panel-section" id="rolePanel">
+                    <div class="role-panel">
+                        <div class="role-panel-header">
+                            <h3>角色跟随</h3>
+                            <span class="role-status-indicator" id="roleStatusIndicator">●</span>
+                        </div>
+                        
+                        <div class="role-controls">
+                            <div class="role-select-row">
+                                <label>选择角色:</label>
+                                <select id="roleSelect" class="role-select">
+                                    <option value="">-- 选择角色 --</option>
+                                </select>
+                            </div>
+                            
+                            <div class="role-buttons">
+                                <button id="btnRefreshRoles" class="btn-secondary" title="刷新角色列表">🔄</button>
+                                <button id="btnToggleFollow" class="btn-primary" disabled>开始跟随</button>
+                            </div>
+                        </div>
+                        
+                        <div class="role-current-info" id="roleCurrentInfo" style="display: none;">
+                            <div class="info-row">
+                                <span class="info-label">当前角色:</span>
+                                <span class="info-value" id="currentRoleName">-</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">所在星系:</span>
+                                <span class="info-value" id="currentSystemName">-</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">安全等级:</span>
+                                <span class="info-value" id="currentSecurityStatus">-</span>
+                            </div>
+                        </div>
+                        
+                        <div class="role-list-section">
+                            <h4>可用角色</h4>
+                            <div class="role-list" id="roleList">
+                                <p class="placeholder">暂无角色，请选择日志目录</p>
+                            </div>
+                        </div>
+                        
+                        <div class="role-log-path">
+                            <label>日志目录:</label>
+                            <div class="path-row">
+                                <input type="text" id="logPathInput" readonly placeholder="选择 EVE 日志目录..." />
+                                <button id="btnSelectLogDir" class="btn-secondary">浏览...</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 路径记录 -->
+                <div class="panel-section" id="pathPanel">
+                    <h3>路径记录 <span class="path-count">(显示最近6个)</span></h3>
+                    <div class="path-list">
+                        <p class="placeholder">点击星系记录路径，或启用角色跟随自动记录</p>
+                    </div>
+                    <button class="clear-path-btn" onclick="window.app.clearPath()">清除路径</button>
+                </div>
+
+                <!-- 控制说明 -->
+                <div class="panel-section controls-help">
+                    <h3>操作说明</h3>
+                    <ul>
+                        <li>🖱️ 左键拖动 - 平移地图</li>
+                        <li>🔍 滚轮 - 缩放</li>
+                        <li>👆 单击 - 选中星系</li>
+                        <li>🏠 双击 - 重置视图</li>
+                    </ul>
+                </div>
+            </aside>
+        </main>
+    </div>
+
+    <!-- 水印 -->
+    <div class="watermark">Designed by LN1P</div>
+
+    <!-- 使用 js-yaml 库解析 YAML -->
+    <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
+    
+    <!-- Supabase 客户端 -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+    <script src="js/services/supabaseService.js?v=90"></script>
+    <script src="js/services/eveAuthService.js"></script>
+    
+    <script src="js/dataLoader.js?v=90"></script>
+    <script src="js/mapRenderer.js?v=90"></script>
+    <script src="js/interaction.js?v=90"></script>
+    <script src="js/eveScoutService.js?v=90"></script>
+    <script src="js/main-legacy.js?v=90"></script>
+    <script src="js/roleFollowIntegration.js?v=90"></script>
+</body>
+</html>
