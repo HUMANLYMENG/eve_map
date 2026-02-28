@@ -471,13 +471,12 @@ class RegionalMapApp {
             const isElectron = window.electronAPI && window.electronAPI.isElectron;
             
             if (isElectron) {
-                // Electron 环境：使用本地服务器接收回调（端口5525）
-                this.eveAuth.redirectUri = 'http://localhost:5525/callback';
+                // Electron 环境：使用统一回调 URL
+                this.eveAuth.redirectUri = 'http://localhost:8080/callback';
                 console.log('[EVE Auth] Electron 模式，回调 URL:', this.eveAuth.redirectUri);
             } else {
-                // 浏览器环境：使用当前页面 origin
-                const currentOrigin = window.location.origin;
-                this.eveAuth.redirectUri = currentOrigin + '/callback.html';
+                // 浏览器环境：使用统一回调 URL
+                this.eveAuth.redirectUri = 'http://localhost:8080/callback';
                 console.log('[EVE Auth] 浏览器模式，回调 URL:', this.eveAuth.redirectUri);
             }
             

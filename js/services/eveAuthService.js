@@ -7,7 +7,7 @@ class EveAuthService {
     constructor() {
         this.clientId = '76334ad33b43464caedc8f611ab78544';
         this.clientSecret = '[REMOVED_EVE_SECRET]';
-        this.redirectUri = 'http://localhost:8080/callback';  // 默认回调 URL
+        this.redirectUri = 'http://localhost:8080/callback';  // 统一回调 URL（浏览器和 Electron兼用）
         this.scopes = [
             'publicData',
             'esi-location.read_location.v1',
