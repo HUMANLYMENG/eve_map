@@ -85,6 +85,8 @@ class WormholeRecord {
     getSourceLabel() {
         if (this.source === 'evescout') {
             return '🌐 ES';
+        } else if (this.source === 'cloud') {
+            return '☁️ 云端';
         }
         return '📝 本地';
     }
@@ -92,12 +94,14 @@ class WormholeRecord {
     getSourceTitle() {
         if (this.source === 'evescout') {
             return `EVE Scout · ${this.createdBy || '未知'}`;
+        } else if (this.source === 'cloud') {
+            return `云端共享 · ${this.createdBy || '未知'}`;
         }
         return '本地记录';
     }
     
     isEditable() {
-        return this.source === 'local';
+        return this.source === 'local' || this.source === 'cloud';
     }
     
     getBookmarks() {
@@ -232,10 +236,12 @@ class RegionalMapApp {
         this.pathRecorder = new PathRecorder(6); // 路径记录器
         this.wormholeRecords = []; // 本地虫洞记录
         this.eveScoutRecords = []; // EVE Scout 虫洞记录
+        this.cloudWormholeRecords = []; // 云端虫洞记录 (Supabase)
         this.detectedWormholes = new Set(); // 已检测到的虫洞，避免重复提示
         this.wormholeTimer = null; // 倒计时定时器
-        this.wormholeFilter = 'all'; // 虫洞显示过滤器: 'all' | 'local' | 'evescout'
+        this.wormholeFilter = 'all'; // 虫洞显示过滤器: 'all' | 'local' | 'cloud' | 'evescout'
         this.eveScoutRefreshTimer = null; // 自动刷新定时器
+        this.supabaseSubscription = null; // Supabase 实时订阅
         
         this.elements = {
             regionSelect: document.getElementById('regionSelect'),
@@ -274,11 +280,17 @@ class RegionalMapApp {
             this.bindEvents();
             this.initWormholePanel();
             
+            // 初始化 Supabase 并加载云端数据
+            this.initSupabase();
+            
             // 加载 EVE Scout 数据（异步，不阻塞）
             this.loadEveScoutData();
             
             // 启动每分钟自动刷新 EVE Scout 数据
             this.startEveScoutAutoRefresh();
+            
+            // 启动每分钟刷新云端数据
+            this.startCloudAutoRefresh();
             
             // 初始化角色跟随功能
             if (typeof this.initRoleFollow === 'function') {
@@ -890,9 +902,12 @@ class RegionalMapApp {
             <div class="wormhole-tabs">
                 <button class="wh-tab active" data-filter="all">全部</button>
                 <button class="wh-tab" data-filter="local">本地</button>
+                <button class="wh-tab" data-filter="cloud">云端</button>
                 <button class="wh-tab" data-filter="evescout">EVE Scout</button>
             </div>
             <div class="wormhole-actions">
+                <button id="addCloudWormhole" class="btn-refresh" title="手动添加虫洞">+</button>
+                <button id="syncToCloud" class="btn-refresh" title="同步到云端">☁️</button>
                 <button id="refreshEveScout" class="btn-refresh" title="刷新 EVE Scout 数据">🔄</button>
                 <span id="lastUpdated" class="last-updated"></span>
             </div>
@@ -925,6 +940,22 @@ class RegionalMapApp {
         this.elements.refreshEveScoutBtn.addEventListener('click', () => {
             this.refreshEveScoutData();
         });
+        
+        // 绑定同步到云端按钮
+        const syncBtn = header.querySelector('#syncToCloud');
+        if (syncBtn) {
+            syncBtn.addEventListener('click', () => {
+                this.syncToCloud();
+            });
+        }
+        
+        // 绑定手动添加虫洞按钮
+        const addBtn = header.querySelector('#addCloudWormhole');
+        if (addBtn) {
+            addBtn.addEventListener('click', () => {
+                this.showAddCloudWormholeDialog();
+            });
+        }
     }
     
     /**
@@ -937,13 +968,16 @@ class RegionalMapApp {
             case 'local':
                 records = this.wormholeRecords;
                 break;
+            case 'cloud':
+                records = this.cloudWormholeRecords;
+                break;
             case 'evescout':
                 records = this.eveScoutRecords;
                 break;
             case 'all':
             default:
-                // 合并本地和 EVE Scout 记录，去除重复
-                records = this.mergeWormholeRecords(this.wormholeRecords, this.eveScoutRecords);
+                // 合并所有数据源（本地、云端、EVE Scout）
+                records = this.mergeAllWormholeRecords();
                 break;
         }
         
@@ -964,6 +998,53 @@ class RegionalMapApp {
             
             if (!isDuplicate) {
                 merged.push(esRecord);
+            }
+        }
+        
+        return merged;
+    }
+    
+    /**
+     * 合并所有数据源的虫洞记录
+     * 优先级：本地 > 云端 > EVE Scout
+     */
+    mergeAllWormholeRecords() {
+        const merged = [];
+        const keys = new Set();
+        
+        // 1. 先添加本地记录（最高优先级）
+        for (const record of this.wormholeRecords) {
+            const key = record.getKey();
+            if (!keys.has(key)) {
+                merged.push(record);
+                keys.add(key);
+            }
+        }
+        
+        // 2. 添加云端记录
+        for (const record of this.cloudWormholeRecords) {
+            const key = record.getKey();
+            // 检查是否与本地记录重复
+            const isDuplicate = this.wormholeRecords.some(local => 
+                local.isSameWormhole(record) || local.getKey() === key
+            );
+            if (!isDuplicate && !keys.has(key)) {
+                merged.push(record);
+                keys.add(key);
+            }
+        }
+        
+        // 3. 添加 EVE Scout 记录（最低优先级）
+        for (const record of this.eveScoutRecords) {
+            const key = record.getKey();
+            // 检查是否与本地或云端记录重复
+            const isDuplicate = this.wormholeRecords.some(local => local.isSameWormhole(record)) ||
+                this.cloudWormholeRecords.some(cloud => cloud.isSameWormhole(record)) ||
+                keys.has(key);
+            
+            if (!isDuplicate) {
+                merged.push(record);
+                keys.add(key);
             }
         }
         
@@ -1095,6 +1176,14 @@ class RegionalMapApp {
         `;
         
         records.forEach((record, index) => {
+            // 调试：输出记录信息
+            console.log('[Table] 虫洞记录:', {
+                fromSystem: record.fromSystem,
+                toSystem: record.toSystem,
+                source: record.source,
+                type: typeof record.fromSystem
+            });
+            
             const remaining = record.getRemainingTime();
             const expired = remaining === '已过期';
             const bookmarks = record.getBookmarks();
@@ -1158,19 +1247,35 @@ class RegionalMapApp {
             });
         });
         
-        // 绑定删除按钮（仅本地记录）
+        // 绑定删除按钮（本地和云端记录）
         container.querySelectorAll('.btn-delete-wh').forEach(btn => {
-            btn.addEventListener('click', (e) => {
+            btn.addEventListener('click', async (e) => {
                 const recordId = e.target.dataset.recordId;
                 const source = e.target.dataset.source;
                 
                 if (source === 'evescout') return; // EVE Scout 记录不可删除
                 
-                // 通过 ID 查找并删除
-                const index = this.wormholeRecords.findIndex(r => r.id === recordId);
-                if (index !== -1) {
-                    this.wormholeRecords.splice(index, 1);
-                    this.updateWormholeTable();
+                if (source === 'cloud') {
+                    // 删除云端记录
+                    const success = await supabaseService.deleteWormhole(recordId);
+                    if (success) {
+                        this.showToast('云端虫洞已删除');
+                        // 从本地缓存中移除
+                        const index = this.cloudWormholeRecords.findIndex(r => r.id === recordId);
+                        if (index !== -1) {
+                            this.cloudWormholeRecords.splice(index, 1);
+                            this.updateWormholeTable();
+                        }
+                    } else {
+                        this.showToast('删除失败', 'error');
+                    }
+                } else {
+                    // 删除本地记录
+                    const index = this.wormholeRecords.findIndex(r => r.id === recordId);
+                    if (index !== -1) {
+                        this.wormholeRecords.splice(index, 1);
+                        this.updateWormholeTable();
+                    }
                 }
             });
         });
@@ -1440,6 +1545,659 @@ class RegionalMapApp {
     
     showLoading(show) {
         this.elements.loadingMask.classList.toggle('hidden', !show);
+    }
+    
+    // ========== Supabase 云端集成 ==========
+    
+    /**
+     * 初始化 Supabase
+     */
+    initSupabase() {
+        if (typeof supabaseService === 'undefined') {
+            console.warn('[App] supabaseService 未加载');
+            return;
+        }
+        
+        // 使用项目配置的 Supabase 连接信息
+        const supabaseUrl = 'https://nvwmogsgkbllkxebvzcg.supabase.co';
+        const supabaseKey = '[REMOVED_SUPABASE_KEY]';
+        
+        const success = supabaseService.init(supabaseUrl, supabaseKey);
+        
+        if (success) {
+            console.log('[App] Supabase 初始化成功');
+            this.loadCloudWormholes();
+            this.subscribeToCloudWormholes();
+        } else {
+            console.warn('[App] Supabase 初始化失败');
+        }
+    }
+    
+    /**
+     * 加载云端虫洞数据
+     */
+    async loadCloudWormholes() {
+        if (!supabaseService.initialized) return;
+        
+        console.log('[App] 加载云端虫洞数据...');
+        const records = await supabaseService.getActiveWormholes();
+        
+        // 调试：输出原始数据
+        if (records.length > 0) {
+            console.log('[App] 云端数据样例:', {
+                fromSystemName: records[0].fromSystemName,
+                toSystemName: records[0].toSystemName,
+                size: records[0].size,
+                source: records[0].source
+            });
+        }
+        
+        // 转换为 WormholeRecord 对象（字段需要与本地格式一致）
+        this.cloudWormholeRecords = records.map(data => {
+            const record = new WormholeRecord({
+                fromSystem: data.fromSystemName || '未知',
+                toSystem: data.toSystemName || '未知',
+                fromSignal: data.fromSignal || '',
+                toSignal: data.toSignal || '',
+                type: '',
+                size: data.size,
+                maxLife: data.lifetime ? Math.round(data.lifetime / 60) + 'h' : '1d',
+                expiresAt: new Date(data.expiresAt).getTime(),
+                source: 'cloud',
+                createdBy: data.createdBy,
+                recordTime: new Date(data.createdAt).getTime()
+            });
+            // 保留云端 ID 用于删除
+            record.id = data.id;
+            return record;
+        });
+        
+        console.log('[App] 加载了', this.cloudWormholeRecords.length, '条云端虫洞');
+        this.updateWormholeTable();
+    }
+    
+    /**
+     * 订阅云端虫洞变化
+     */
+    subscribeToCloudWormholes() {
+        if (!supabaseService.initialized) return;
+        
+        this.supabaseSubscription = supabaseService.subscribeToWormholes({
+            onInsert: (data) => {
+                console.log('[App] 云端新虫洞:', data);
+                this.showToast(`新虫洞: ${data.fromSystemName} → ${data.toSystemName}`);
+                this.loadCloudWormholes(); // 重新加载所有数据
+            },
+            onUpdate: (data) => {
+                console.log('[App] 云端虫洞更新:', data);
+                this.loadCloudWormholes();
+            },
+            onDelete: (data) => {
+                console.log('[App] 云端虫洞删除:', data);
+                this.loadCloudWormholes();
+            }
+        });
+    }
+    
+    /**
+     * 同步本地虫洞到云端
+     */
+    async syncToCloud() {
+        if (!supabaseService.initialized) {
+            this.showToast('Supabase 未连接', 'error');
+            return;
+        }
+        
+        if (this.wormholeRecords.length === 0) {
+            this.showToast('没有本地虫洞需要同步');
+            return;
+        }
+        
+        console.log('[App] 开始同步', this.wormholeRecords.length, '条虫洞到云端...');
+        
+        let successCount = 0;
+        // 用于追踪已同步的记录（避免重复）
+        const syncedKeys = new Set();
+        
+        for (const record of this.wormholeRecords) {
+            // 跳过已经同步到云端的记录（避免重复同步）
+            if (record.syncedToCloud) {
+                console.log('[Sync] 跳过已同步记录:', record.fromSystem, '->', record.toSystem);
+                continue;
+            }
+            
+            // 调试：输出记录内容
+            console.log('[Sync] 本地记录:', {
+                fromSystem: record.fromSystem,
+                toSystem: record.toSystem,
+                fromSignal: record.fromSignal,
+                toSignal: record.toSignal,
+                type: typeof record.fromSystem
+            });
+            
+            // 生成唯一键（用于去重）
+            const syncKey = `${record.fromSystem}-${record.toSystem}`;
+            if (syncedKeys.has(syncKey)) {
+                console.log('[Sync] 跳过重复记录:', syncKey);
+                continue;
+            }
+            syncedKeys.add(syncKey);
+            
+            // 处理 fromSystem 和 toSystem（可能是字符串或对象）
+            let fromSystemName = typeof record.fromSystem === 'string' 
+                ? record.fromSystem 
+                : (record.fromSystem?.name || '');
+            let toSystemName = typeof record.toSystem === 'string' 
+                ? record.toSystem 
+                : (record.toSystem?.name || '');
+            
+            // 如果名称为空，尝试使用 signal 或其他字段
+            if (!fromSystemName) fromSystemName = record.fromSignal || '未知';
+            if (!toSystemName) toSystemName = record.toSignal || '未知';
+            
+            console.log('[Sync] 处理后名称:', { fromSystemName, toSystemName });
+            
+            const cloudRecord = {
+                fromSystemId: '',
+                fromSystemName: fromSystemName,
+                toSystemId: '',
+                toSystemName: toSystemName,
+                fromSignal: record.fromSignal || '',
+                toSignal: record.toSignal || '',
+                size: record.size,
+                mass: record.mass,
+                lifetime: record.remainingHours ? record.remainingHours * 60 : 1440,
+                source: 'cloud',
+                createdBy: record.createdBy || '匿名'
+            };
+            
+            // 使用本地记录的过期时间，保持一致
+            if (record.expiresAt) {
+                const remainingMs = record.expiresAt - Date.now();
+                if (remainingMs > 0) {
+                    cloudRecord.lifetime = Math.floor(remainingMs / 60000); // 转换为分钟
+                }
+            }
+            
+            const result = await supabaseService.createWormhole(cloudRecord);
+            if (result) {
+                successCount++;
+                // 标记本地记录已同步（但不修改 source，保持显示为本地）
+                record.syncedToCloud = true;
+                record.cloudId = result.id; // 保存云端 ID 用于删除
+            }
+        }
+        
+        this.showToast(`成功同步 ${successCount} 条虫洞到云端`);
+        console.log('[App] 同步完成:', successCount, '条');
+        
+        // 同步后立即刷新云端数据
+        if (successCount > 0) {
+            await this.loadCloudWormholes();
+        }
+    }
+    
+    /**
+     * 显示手动添加虫洞对话框（支持单条和批量导入）
+     */
+    showAddCloudWormholeDialog() {
+        if (!supabaseService.initialized) {
+            this.showToast('Supabase 未连接', 'error');
+            return;
+        }
+        
+        const dialog = document.createElement('div');
+        dialog.className = 'wormhole-dialog';
+        dialog.innerHTML = `
+            <div class="wormhole-dialog-content" style="max-width: 500px;">
+                <h3>添加虫洞到云端</h3>
+                
+                <!-- 选项卡 -->
+                <div class="dialog-tabs">
+                    <button class="tab-btn active" data-tab="single">单条添加</button>
+                    <button class="tab-btn" data-tab="batch">批量导入</button>
+                </div>
+                
+                <!-- 单条添加面板 -->
+                <div class="tab-panel" id="panel-single">
+                    <div class="wormhole-form">
+                        <div class="form-row">
+                            <label>起点星系:</label>
+                            <input type="text" id="cloud-wh-from" placeholder="例如: 耶舒尔" required>
+                        </div>
+                        <div class="form-row">
+                            <label>终点星系:</label>
+                            <input type="text" id="cloud-wh-to" placeholder="例如: 杰尼" required>
+                        </div>
+                        <div class="form-row">
+                            <label>起点信号:</label>
+                            <input type="text" id="cloud-wh-from-sig" placeholder="例如: ABC-123">
+                        </div>
+                        <div class="form-row">
+                            <label>终点信号:</label>
+                            <input type="text" id="cloud-wh-to-sig" placeholder="例如: XYZ-789">
+                        </div>
+                        <div class="form-row">
+                            <label>虫洞大小:</label>
+                            <select id="cloud-wh-size">
+                                <option value="S">S (小型)</option>
+                                <option value="M">M (中型)</option>
+                                <option value="L" selected>L (大型)</option>
+                                <option value="XL">XL (超大型)</option>
+                            </select>
+                        </div>
+                        <div class="form-row">
+                            <label>剩余时间:</label>
+                            <select id="cloud-wh-life">
+                                <option value="1">小于 4 小时</option>
+                                <option value="4" selected>4 小时 - 24 小时</option>
+                                <option value="24">24 小时 - 48 小时</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 批量导入面板 -->
+                <div class="tab-panel hidden" id="panel-batch">
+                    <div class="batch-import-info">
+                        <p>📋 <strong>从游戏复制粘贴虫洞列表</strong></p>
+                        <p style="font-size: 12px; color: #888;">格式: 信号 > 目的地 | 起点星系 | 过期时间(UTC+0)</p>
+                    </div>
+                    <textarea id="batch-wh-data" placeholder="IVI-608 > J114330	...	...	Naga	...	...	2026.02.28 09:34	2026.03.01 09:34	Carthago
+EOF-368 > J220546	...	...	J114330	...	...	2026.02.28 09:26	2026.03.01 09:26	Carthago
+...
+(粘贴多行数据，每行一个虫洞)" style="width: 100%; height: 150px; font-family: monospace; font-size: 11px;"></textarea>
+                    <div id="batch-preview" style="margin-top: 10px; max-height: 150px; overflow-y: auto;"></div>
+                </div>
+                
+                <div class="wormhole-dialog-buttons">
+                    <button class="btn-save" id="btn-save-wh">保存到云端</button>
+                    <button class="btn-cancel">取消</button>
+                </div>
+            </div>
+        `;
+        
+        // 添加选项卡样式
+        const style = document.createElement('style');
+        style.textContent = `
+            .dialog-tabs { display: flex; gap: 10px; margin-bottom: 15px; border-bottom: 1px solid #444; padding-bottom: 10px; }
+            .tab-btn { background: transparent; border: none; color: #888; padding: 8px 16px; cursor: pointer; font-size: 14px; }
+            .tab-btn.active { color: #fff; border-bottom: 2px solid #5a8fc7; }
+            .tab-btn:hover { color: #ccc; }
+            .tab-panel.hidden { display: none; }
+            .batch-import-info { background: rgba(90, 143, 199, 0.1); padding: 10px; border-radius: 4px; margin-bottom: 10px; }
+            .batch-import-info p { margin: 4px 0; }
+            #batch-wh-data { background: #1a1a1a; border: 1px solid #444; color: #ddd; padding: 8px; border-radius: 4px; resize: vertical; }
+            #batch-preview table { width: 100%; font-size: 11px; border-collapse: collapse; }
+            #batch-preview th, #batch-preview td { padding: 4px 6px; text-align: left; border-bottom: 1px solid #333; }
+            #batch-preview th { color: #888; }
+            .preview-valid { color: #5ac75a; }
+            .preview-invalid { color: #c75a5a; }
+        `;
+        document.head.appendChild(style);
+        
+        document.body.appendChild(dialog);
+        
+        let currentTab = 'single';
+        let parsedBatchData = [];
+        
+        // 选项卡切换
+        dialog.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                dialog.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                dialog.querySelectorAll('.tab-panel').forEach(p => p.classList.add('hidden'));
+                document.getElementById('panel-' + btn.dataset.tab).classList.remove('hidden');
+                currentTab = btn.dataset.tab;
+            });
+        });
+        
+        // 实时解析批量数据
+        const batchTextarea = document.getElementById('batch-wh-data');
+        if (batchTextarea) {
+            batchTextarea.addEventListener('input', () => {
+                parsedBatchData = this.parseBatchWormholeData(batchTextarea.value);
+                this.showBatchPreview(parsedBatchData);
+            });
+        }
+        
+        // 绑定保存按钮
+        document.getElementById('btn-save-wh').addEventListener('click', async () => {
+            if (currentTab === 'single') {
+                // 单条添加
+                const fromSystem = document.getElementById('cloud-wh-from').value.trim();
+                const toSystem = document.getElementById('cloud-wh-to').value.trim();
+                const fromSignal = document.getElementById('cloud-wh-from-sig').value.trim();
+                const toSignal = document.getElementById('cloud-wh-to-sig').value.trim();
+                const size = document.getElementById('cloud-wh-size').value;
+                const lifeHours = parseInt(document.getElementById('cloud-wh-life').value);
+                
+                if (!fromSystem || !toSystem) {
+                    this.showToast('请填写起点和终点星系', 'error');
+                    return;
+                }
+                
+                const cloudRecord = {
+                    fromSystemId: '',
+                    fromSystemName: fromSystem,
+                    toSystemId: '',
+                    toSystemName: toSystem,
+                    fromSignal: fromSignal,
+                    toSignal: toSignal,
+                    size: size,
+                    mass: 'stable',
+                    lifetime: lifeHours * 60,
+                    source: 'cloud',
+                    createdBy: '用户手动添加'
+                };
+                
+                const result = await supabaseService.createWormhole(cloudRecord);
+                
+                if (result) {
+                    this.showToast('虫洞已保存到云端');
+                    document.body.removeChild(dialog);
+                    await this.loadCloudWormholes();
+                } else {
+                    this.showToast('保存失败', 'error');
+                }
+            } else {
+                // 批量导入
+                if (parsedBatchData.length === 0) {
+                    this.showToast('没有可导入的数据', 'error');
+                    return;
+                }
+                
+                const validRecords = parsedBatchData.filter(r => r.valid);
+                if (validRecords.length === 0) {
+                    this.showToast('没有有效的虫洞数据', 'error');
+                    return;
+                }
+                
+                this.showToast(`正在导入 ${validRecords.length} 条虫洞...`);
+                
+                let successCount = 0;
+                for (const record of validRecords) {
+                    const result = await supabaseService.createWormhole(record.data);
+                    if (result) successCount++;
+                }
+                
+                this.showToast(`成功导入 ${successCount}/${validRecords.length} 条虫洞`);
+                document.body.removeChild(dialog);
+                await this.loadCloudWormholes();
+            }
+        });
+        
+        // 绑定取消按钮
+        dialog.querySelector('.btn-cancel').addEventListener('click', () => {
+            document.body.removeChild(dialog);
+        });
+        
+        // 点击背景关闭
+        dialog.addEventListener('click', (e) => {
+            if (e.target === dialog) {
+                document.body.removeChild(dialog);
+            }
+        });
+    }
+    
+    /**
+     * 解析批量虫洞数据
+     * @param {string} text - 粘贴的表格数据
+     * @returns {Array} 解析结果数组
+     */
+    parseBatchWormholeData(text) {
+        if (!text || !text.trim()) return [];
+        
+        const lines = text.trim().split('\n');
+        const results = [];
+        
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            if (!line.trim()) continue;
+            
+            // 按 Tab 分割
+            const cols = line.split('\t');
+            
+            if (cols.length < 9) {
+                console.warn(`第${i+1}行: 列数不足 (只有${cols.length}列, 需要9列)`);
+                results.push({
+                    valid: false,
+                    error: `列数不足 (只有${cols.length}列)`,
+                    raw: line.substring(0, 100)
+                });
+                continue;
+            }
+            
+            try {
+                // 第1列: 信号 > 目的地 (如: IVI-608 > J114330)
+                let col1 = cols[0].trim();
+                
+                // 处理HTML实体编码 (如 &gt; 转为 >)
+                col1 = col1.replace(/&gt;/g, '>').replace(/&lt;/g, '<').replace(/&amp;/g, '&');
+                
+                const signalMatch = col1.match(/^([A-Z0-9-]+)\s*>\s*(.+)$/);
+                const signalName = signalMatch ? signalMatch[1] : col1;
+                const destination = signalMatch ? signalMatch[2] : '';
+                
+                // 第4列: 起点星系
+                const fromSystem = cols[3].trim();
+                
+                // 第8列: 过期时间 (UTC+0) - 格式: 2026.03.01 09:34
+                const expireTimeStr = cols[7].trim();
+                
+                // 第9列: 创建者
+                const createdBy = cols[8] ? cols[8].trim() : '匿名';
+                
+                // 验证必填字段
+                if (!fromSystem) {
+                    results.push({
+                        valid: false,
+                        error: '缺少起点星系',
+                        raw: line.substring(0, 100)
+                    });
+                    continue;
+                }
+                
+                // 时间转换: UTC+0 → 北京时间，计算剩余分钟
+                const remainingMinutes = this.calculateRemainingMinutesFromUTC(expireTimeStr);
+                
+                if (remainingMinutes <= 0) {
+                    results.push({
+                        valid: false,
+                        error: remainingMinutes === 0 ? '无法解析时间' : '已过期',
+                        raw: line.substring(0, 100),
+                        fromSystem,
+                        destination
+                    });
+                    continue;
+                }
+                
+                results.push({
+                    valid: true,
+                    data: {
+                        fromSystemId: '',
+                        fromSystemName: fromSystem,
+                        toSystemId: '',
+                        toSystemName: destination,
+                        fromSignal: signalName,
+                        toSignal: '',
+                        size: 'L',
+                        mass: 'stable',
+                        lifetime: remainingMinutes,
+                        source: 'cloud',
+                        createdBy: createdBy
+                    },
+                    fromSystem,
+                    destination,
+                    signalName,
+                    remainingMinutes,
+                    matched: false  // 是否已匹配反向虫洞
+                });
+                
+            } catch (e) {
+                console.error(`解析第${i+1}行异常:`, e);
+                results.push({
+                    valid: false,
+                    error: '解析异常: ' + e.message,
+                    raw: line.substring(0, 100)
+                });
+            }
+        }
+        
+        // 匹配反向虫洞：A->B 和 B->A 是同一个虫洞的两个方向
+        this.matchReverseWormholes(results);
+        
+        return results;
+    }
+    
+    /**
+     * 匹配反向虫洞，互补 toSignal
+     * @param {Array} results - 解析结果数组
+     */
+    matchReverseWormholes(results) {
+        const validRecords = results.filter(r => r.valid);
+        
+        for (let i = 0; i < validRecords.length; i++) {
+            const recordA = validRecords[i];
+            if (recordA.matched) continue;  // 已匹配过的跳过
+            
+            // 查找反向虫洞：A的起点是B的终点，且A的终点是B的起点
+            const reverseRecord = validRecords.find(r => 
+                r !== recordA && 
+                !r.matched &&
+                r.fromSystem === recordA.destination &&
+                r.destination === recordA.fromSystem
+            );
+            
+            if (reverseRecord) {
+                // 找到反向虫洞，互相补全 toSignal
+                recordA.data.toSignal = reverseRecord.signalName;
+                reverseRecord.data.toSignal = recordA.signalName;
+                
+                recordA.matched = true;
+                reverseRecord.matched = true;
+                
+                console.log(`[BatchImport] 匹配反向虫洞: ${recordA.signalName} (${recordA.fromSystem}<>${recordA.destination}) <-> ${reverseRecord.signalName}`);
+            }
+        }
+    }
+    
+    /**
+     * 根据 UTC 过期时间计算剩余分钟（转换为北京时间）
+     * @param {string} utcTimeStr - UTC+0 时间，格式: 2026.03.01 09:34
+     * @returns {number} 剩余分钟
+     */
+    calculateRemainingMinutesFromUTC(utcTimeStr) {
+        try {
+            // 输入验证
+            if (!utcTimeStr || typeof utcTimeStr !== 'string') {
+                console.error('无效的时间输入:', utcTimeStr);
+                return 0;
+            }
+            
+            const trimmed = utcTimeStr.trim();
+            if (!trimmed) {
+                console.error('空的时间输入');
+                return 0;
+            }
+            
+            // 将 2026.03.01 09:34 格式转换为 ISO 格式 2026-03-01T09:34:00Z
+            const isoStr = trimmed.replace(/\./g, '-').replace(' ', 'T') + ':00Z';
+            
+            const utcDate = new Date(isoStr);
+            
+            // 检查日期是否有效
+            if (isNaN(utcDate.getTime())) {
+                console.error('无法解析日期:', utcTimeStr, '-> ISO:', isoStr);
+                return 0;
+            }
+            
+            // 转换为北京时间 (UTC+8)
+            const beijingDate = new Date(utcDate.getTime() + 8 * 60 * 60 * 1000);
+            
+            // 当前北京时间
+            const now = new Date();
+            const nowBeijing = new Date(now.getTime() + now.getTimezoneOffset() * 60000 + 8 * 60 * 60 * 1000);
+            
+            // 计算差值（毫秒）
+            const diffMs = beijingDate - nowBeijing;
+            
+            return Math.floor(diffMs / 60000); // 转换为分钟
+        } catch (e) {
+            console.error('时间解析失败:', utcTimeStr, e);
+            return 0;
+        }
+    }
+    
+    /**
+     * 显示批量导入预览
+     * @param {Array} parsedData - 解析后的数据
+     */
+    showBatchPreview(parsedData) {
+        const previewDiv = document.getElementById('batch-preview');
+        if (!previewDiv) return;
+        
+        if (parsedData.length === 0) {
+            previewDiv.innerHTML = '';
+            return;
+        }
+        
+        const validCount = parsedData.filter(r => r.valid).length;
+        const invalidCount = parsedData.length - validCount;
+        
+        let html = `<p style="margin: 0 0 8px 0; font-size: 12px;">共 ${parsedData.length} 行: <span class="preview-valid">${validCount} 有效</span>, <span class="preview-invalid">${invalidCount} 无效</span></p>`;
+        
+        html += '<table><thead><tr><th>起点</th><th>终点</th><th>信号</th><th>剩余</th><th>状态</th></tr></thead><tbody>';
+        
+        // 统计匹配情况
+        const matchedCount = parsedData.filter(r => r.valid && r.matched).length;
+        if (matchedCount > 0) {
+            html += `<p style="margin: 0 0 8px 0; font-size: 12px; color: #66bb6a;">已匹配 ${matchedCount} 条反向虫洞 ✓</p>`;
+        }
+        
+        html += '<table><thead><tr><th>起点</th><th>终点</th><th>信号</th><th>对面信号</th><th>剩余</th><th>状态</th></tr></thead><tbody>';
+        
+        parsedData.slice(0, 10).forEach(item => {
+            if (item.valid) {
+                const hours = Math.floor(item.remainingMinutes / 60);
+                const mins = item.remainingMinutes % 60;
+                const matchedIcon = item.matched ? '↔' : '';
+                const toSignal = item.data.toSignal || '-';
+                html += `<tr>
+                    <td>${item.fromSystem}</td>
+                    <td>${item.destination}</td>
+                    <td>${item.signalName}</td>
+                    <td>${toSignal} ${matchedIcon}</td>
+                    <td>${hours}小时${mins}分</td>
+                    <td class="preview-valid">✓</td>
+                </tr>`;
+            } else {
+                html += `<tr>
+                    <td colspan="5" style="color: #888;">${item.raw.substring(0, 50)}...</td>
+                    <td class="preview-invalid" title="${item.error}">✗</td>
+                </tr>`;
+            }
+        });
+        
+        if (parsedData.length > 10) {
+            html += `<tr><td colspan="6" style="text-align: center; color: #888;">还有 ${parsedData.length - 10} 行...</td></tr>`;
+        }
+        
+        html += '</tbody></table>';
+        previewDiv.innerHTML = html;
+    }
+    
+    /**
+     * 启动云端数据自动刷新
+     */
+    startCloudAutoRefresh() {
+        // 每分钟刷新一次云端数据
+        setInterval(() => {
+            console.log('[App] 自动刷新云端虫洞数据...');
+            this.loadCloudWormholes();
+        }, 60 * 1000); // 1分钟
+        
+        console.log('[App] 云端虫洞自动刷新已启动（1分钟）');
     }
     
     showToast(message, type = 'info') {
