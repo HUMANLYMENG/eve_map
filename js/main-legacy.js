@@ -449,7 +449,11 @@ class RegionalMapApp {
             const currentOrigin = window.location.origin;
             this.eveAuth.redirectUri = currentOrigin + '/callback.html';
             
+            console.log('[EVE Auth] 回调 URL:', this.eveAuth.redirectUri);
+            
             const authUrl = await this.eveAuth.buildAuthUrl();
+            
+            console.log('[EVE Auth] 授权 URL:', authUrl);
             
             // 存储 PKCE 参数
             sessionStorage.setItem('eve_code_verifier', this.eveAuth.codeVerifier);
