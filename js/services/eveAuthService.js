@@ -5,8 +5,13 @@
 
 class EveAuthService {
     constructor() {
-        this.clientId = '76334ad33b43464caedc8f611ab78544';
-        this.clientSecret = '[REMOVED_EVE_SECRET]';
+        // 使用配置文件中的 EVE 凭证
+        this.clientId = AppConfig?.eve?.clientId || '76334ad33b43464caedc8f611ab78544';
+        this.clientSecret = AppConfig?.eve?.clientSecret;
+        
+        if (!this.clientSecret || this.clientSecret.includes('YOUR_')) {
+            throw new Error('EVE Client Secret 未配置，请编辑 config.js');
+        }
         this.redirectUri = 'http://localhost:8080/callback';  // 统一回调 URL（浏览器和 Electron兼用）
         this.scopes = [
             'publicData',

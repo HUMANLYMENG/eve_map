@@ -1779,9 +1779,14 @@ class RegionalMapApp {
             return;
         }
         
-        // 使用项目配置的 Supabase 连接信息
-        const supabaseUrl = 'https://nvwmogsgkbllkxebvzcg.supabase.co';
-        const supabaseKey = '[REMOVED_SUPABASE_KEY]';
+        // 使用配置文件中的 Supabase 连接信息
+        const supabaseUrl = AppConfig?.supabase?.url || 'https://nvwmogsgkbllkxebvzcg.supabase.co';
+        const supabaseKey = AppConfig?.supabase?.key;
+        
+        if (!supabaseKey || supabaseKey.includes('YOUR_')) {
+            console.warn('[App] Supabase key 未配置，云端功能将不可用');
+            return;
+        }
         
         const success = supabaseService.init(supabaseUrl, supabaseKey);
         
