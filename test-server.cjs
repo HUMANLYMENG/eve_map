@@ -43,6 +43,11 @@ const server = http.createServer((req, res) => {
         urlPath = '/test-eve-auth.html';
     }
     
+    // EVE SSO 回调路径映射
+    if (urlPath === '/callback') {
+        urlPath = '/callback.html';
+    }
+    
     // 构建文件路径
     let filePath = path.join(__dirname, urlPath);
     
