@@ -1853,6 +1853,60 @@ class RegionalMapApp {
         
         console.log('[App] 加载了', this.cloudWormholeRecords.length, '条云端虫洞');
         this.updateWormholeTable();
+        
+        // 更新地图上的云端虫洞连接
+        this.updateCloudWormholeConnections();
+    }
+    
+    /**
+     * 更新地图上的云端虫洞连接
+     */
+    updateCloudWormholeConnections() {
+        // 将云端虫洞转换为地图连接格式
+        const cloudConnections = this.cloudWormholeRecords.map(record => ({
+            from: {
+                id: record.fromSystem,
+                name: record.fromSystem
+            },
+            to: {
+                id: record.toSystem,
+                name: record.toSystem
+            },
+            source: 'cloud',
+            isCloudConnection: true,
+            size: record.size,
+            expiresAt: record.expiresAt
+        }));
+        
+        console.log('[App] 云端虫洞连接:', cloudConnections.length);
+        
+        // 合并到现有路径数据中（如果有）
+        const existingConnections = this.pathRecorder ? this.pathRecorder.getDisplayConnections() : [];
+        const existingSystems = this.pathRecorder ? this.pathRecorder.getDisplayPath() : [];
+        
+        // 过滤掉已存在的连接（避免重复）
+        const existingKeys = new Set(existingConnections.map(c => 
+            `${c.from.id}-${c.to.id}`
+        ));
+        
+        const newConnections = cloudConnections.filter(c => 
+            !existingKeys.has(`${c.from.id}-${c.to.id}`) && 
+            !existingKeys.has(`${c.to.id}-${c.from.id}`)
+        );
+        
+        const mergedConnections = [...existingConnections, ...newConnections];
+        
+        // 合并星系数据
+        const cloudSystems = cloudConnections.map(c => c.from).concat(cloudConnections.map(c => c.to));
+        const systemIds = new Set(existingSystems.map(s => s.id));
+        const newSystems = cloudSystems.filter(s => !systemIds.has(s.id));
+        const mergedSystems = [...existingSystems, ...newSystems];
+        
+        // 更新渲染器
+        if (this.renderer) {
+            this.renderer.setPathData(mergedSystems, mergedConnections);
+            console.log('[App] 地图已更新云端虫洞连接:', newConnections.length);
+        }
     }
     
     /**

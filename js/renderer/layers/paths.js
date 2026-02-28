@@ -80,6 +80,12 @@ export class PathsLayer extends RenderLayer {
         return true;
       }
     }
+    // 检查云端虫洞连接
+    for (const conn of this.pathConnections) {
+      if (conn.isCloudConnection && (isInSystems(conn.from.id) || isInSystems(conn.to.id))) {
+        return true;
+      }
+    }
     return false;
   }
   
@@ -571,15 +577,21 @@ export class PathsLayer extends RenderLayer {
       const from = this.worldToScreen(fromPos);
       const to = this.worldToScreen(toPos);
       
-      // 检查是否是 EVE Scout 虫洞连接
+      // 检查连接类型
       const isEveScout = conn.isEveScoutConnection || conn.source === 'evescout';
-      const hasStargate = !isEveScout && hasStargateFn(conn.from.id, conn.to.id);
+      const isCloud = conn.isCloudConnection || conn.source === 'cloud';
+      const hasStargate = !isEveScout && !isCloud && hasStargateFn(conn.from.id, conn.to.id);
       
       ctx.beginPath();
       ctx.moveTo(from.x, from.y);
       ctx.lineTo(to.x, to.y);
       
-      if (isEveScout) {
+      if (isCloud) {
+        // 云端虫洞连接 - 使用青色实线
+        ctx.strokeStyle = '#00d4ff';
+        ctx.lineWidth = this.getScaledSize(2.5);
+        ctx.setLineDash([]);
+      } else if (isEveScout) {
         // EVE Scout 虫洞连接 - 使用紫色虚线
         ctx.strokeStyle = '#c084fc';
         ctx.lineWidth = this.getScaledSize(2);
@@ -600,7 +612,16 @@ export class PathsLayer extends RenderLayer {
       ctx.setLineDash([]);
       
       // 绘制箭头
-      const arrowColor = isEveScout ? '#c084fc' : (hasStargate ? '#ffaa00' : '#5a8fc7');
+      let arrowColor;
+      if (isCloud) {
+        arrowColor = '#00d4ff';
+      } else if (isEveScout) {
+        arrowColor = '#c084fc';
+      } else if (hasStargate) {
+        arrowColor = '#ffaa00';
+      } else {
+        arrowColor = '#5a8fc7';
+      }
       this._drawArrow(from, to, arrowColor);
     }
   }
