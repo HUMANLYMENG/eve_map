@@ -1245,3 +1245,89 @@ body {
     font-family: monospace;
     letter-spacing: 1px;
 }
+ 
+ 
+/* ==================== EVE 登录认证 ==================== */
+.eve-auth-container {
+    margin-left: 16px;
+    display: flex;
+    align-items: center;
+}
+
+.eve-login-btn {
+    display: block;
+    height: 32px;
+    transition: transform 0.2s, box-shadow 0.2s;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.eve-login-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(90, 143, 199, 0.3);
+}
+
+.eve-login-btn img {
+    height: 100%;
+    width: auto;
+    display: block;
+}
+
+.eve-auth-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(90, 143, 199, 0.1);
+    border: 1px solid rgba(90, 143, 199, 0.3);
+    border-radius: 20px;
+    padding: 4px 12px 4px 4px;
+    transition: all 0.2s;
+}
+
+.eve-auth-status:hover {
+    background: rgba(90, 143, 199, 0.15);
+    border-color: rgba(90, 143, 199, 0.5);
+}
+
+.eve-auth-status img {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    border: 1px solid rgba(90, 143, 199, 0.5);
+}
+
+.eve-auth-info {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+#eve-auth-name {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.eve-auth-tag {
+    font-size: 9px;
+    color: var(--accent-green);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.eve-logout-btn {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 14px;
+    cursor: pointer;
+    padding: 2px 4px;
+    margin-left: 4px;
+    border-radius: 3px;
+    transition: all 0.2s;
+}
+
+.eve-logout-btn:hover {
+    background: rgba(199, 90, 90, 0.2);
+    color: var(--accent-red);
+}

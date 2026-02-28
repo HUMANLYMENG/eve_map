@@ -408,7 +408,7 @@ class RegionalMapApp {
      */
     bindEveAuthEvents() {
         const eveLoginBtn = document.getElementById('eveLoginBtn');
-        const logoutBtn = document.getElementById('btn-cloud-logout');
+        const logoutBtn = document.getElementById('eve-logout-btn');
         
         if (eveLoginBtn) {
             eveLoginBtn.addEventListener('click', (e) => {
@@ -445,8 +445,8 @@ class RegionalMapApp {
         this.eveAuth = new EveAuthService();
         
         try {
-            // 更改回调 URL 为本地回调页面
-            this.eveAuth.redirectUri = window.location.origin + '/callback.html';
+            // 回调 URL 必须与 EVE Developer 配置完全匹配
+            this.eveAuth.redirectUri = 'http://localhost:8000/callback';
             
             const authUrl = await this.eveAuth.buildAuthUrl();
             
@@ -524,35 +524,34 @@ class RegionalMapApp {
      * 更新云端认证 UI
      */
     updateCloudAuthUI(characterInfo, authorized = true) {
-        const promptDiv = document.getElementById('cloud-auth-prompt');
-        const statusDiv = document.getElementById('cloud-auth-status');
+        const loginBtn = document.getElementById('eveLoginBtn');
+        const statusDiv = document.getElementById('eve-auth-status');
         
-        if (promptDiv) promptDiv.style.display = 'none';
+        if (loginBtn) loginBtn.style.display = 'none';
         if (statusDiv) {
-            statusDiv.style.display = 'block';
+            statusDiv.style.display = 'flex';
             
             // 设置头像
-            const avatar = document.getElementById('auth-character-avatar');
+            const avatar = document.getElementById('eve-auth-avatar');
             if (avatar) {
                 avatar.src = `https://images.evetech.net/characters/${characterInfo.character_id}/portrait?size=64`;
             }
             
             // 设置角色名
-            const nameDiv = document.getElementById('auth-character-name');
+            const nameDiv = document.getElementById('eve-auth-name');
             if (nameDiv) {
                 nameDiv.textContent = characterInfo.name;
             }
             
-            // 设置联盟状态
-            const statusDiv2 = document.getElementById('auth-alliance-status');
-            if (statusDiv2) {
+            // 设置联盟状态标签
+            const tagSpan = document.getElementById('eve-auth-tag');
+            if (tagSpan) {
                 if (authorized) {
-                    statusDiv2.textContent = '✓ 联盟认证通过';
-                    statusDiv2.style.color = '#4caf50';
+                    tagSpan.textContent = '✓ 联盟认证通过';
+                    tagSpan.style.color = 'var(--accent-green)';
                 } else {
-                    const allianceName = characterInfo.alliance?.name || '未知';
-                    statusDiv2.textContent = `✗ 非目标联盟 (${allianceName})`;
-                    statusDiv2.style.color = '#f44336';
+                    tagSpan.textContent = '✗ 非目标联盟';
+                    tagSpan.style.color = 'var(--accent-red)';
                 }
             }
         }
@@ -566,10 +565,10 @@ class RegionalMapApp {
         this.eveAuth = null;
         
         // 重置 UI
-        const promptDiv = document.getElementById('cloud-auth-prompt');
-        const statusDiv = document.getElementById('cloud-auth-status');
+        const loginBtn = document.getElementById('eveLoginBtn');
+        const statusDiv = document.getElementById('eve-auth-status');
         
-        if (promptDiv) promptDiv.style.display = 'block';
+        if (loginBtn) loginBtn.style.display = 'block';
         if (statusDiv) statusDiv.style.display = 'none';
         
         this.showToast('已退出登录');
