@@ -95,6 +95,29 @@
                         <p class="placeholder">暂无虫洞记录</p>
                     </div>
                 </div>
+                
+                <!-- 云端认证面板 -->
+                <div class="panel-section" id="cloudAuthPanel">
+                    <h3>云端同步</h3>
+                    <div id="cloud-auth-prompt" style="display: none;">
+                        <p class="placeholder">需要 EVE 联盟认证才能访问云端数据</p>
+                        <a href="#" id="eveLoginBtn" class="eve-login-btn" title="Login with EVE Online">
+                            <img src="https://web.ccpgamescdn.com/eveonlineassets/developers/eve-sso-login-black-large.png" 
+                                 alt="Login with EVE Online" style="width: 100%; max-width: 200px;">
+                        </a>
+                    </div>
+                    <div id="cloud-auth-status" style="display: none;">
+                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                            <img id="auth-character-avatar" src="" alt="" style="width: 32px; height: 32px; border-radius: 50%;">
+                            <div>
+                                <div id="auth-character-name" style="font-weight: bold;"></div>
+                                <div id="auth-alliance-status" style="font-size: 11px;"></div>
+                            </div>
+                        </div>
+                        <button id="btn-cloud-sync" class="btn-primary" style="width: 100%; margin-bottom: 8px;">同步到云端</button>
+                        <button id="btn-cloud-logout" class="btn-secondary" style="width: 100%;">退出登录</button>
+                    </div>
+                </div>
 
                 <!-- 角色跟随 -->
                 <div class="panel-section" id="rolePanel">
@@ -182,6 +205,7 @@
     <!-- Supabase 客户端 -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
     <script src="js/services/supabaseService.js?v=90"></script>
+    <script src="js/services/eveAuthService.js"></script>
     
     <script src="js/dataLoader.js?v=90"></script>
     <script src="js/mapRenderer.js?v=90"></script>

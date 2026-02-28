@@ -1,6 +1,7 @@
 /**
  * EVE Regional Map - Supabase 服务
  * 提供虫洞数据的云端存储和实时同步
+ * 需要通过 EVE 联盟认证才能访问
  */
 
 class SupabaseService {
@@ -8,6 +9,9 @@ class SupabaseService {
         this.supabase = null;
         this.subscriptions = [];
         this.initialized = false;
+        this.authorized = false;  // 联盟认证状态
+        this.characterInfo = null; // 认证的角色信息
+        this.TARGET_ALLIANCE_ID = 495729389; // 目标联盟ID
     }
 
     /**
@@ -34,13 +38,76 @@ class SupabaseService {
     }
 
     /**
+     * 设置联盟认证状态
+     * @param {Object} characterInfo - 角色信息（包含 corporation 和 alliance）
+     * @returns {boolean} 是否通过认证
+     */
+    setAllianceAuth(characterInfo) {
+        if (!characterInfo) {
+            this.authorized = false;
+            this.characterInfo = null;
+            return false;
+        }
+        
+        // 检查是否属于目标联盟
+        const hasAlliance = characterInfo.corporation?.alliance_id === this.TARGET_ALLIANCE_ID;
+        const isTargetAlliance = characterInfo.is_target_alliance === true;
+        
+        this.authorized = hasAlliance || isTargetAlliance;
+        this.characterInfo = characterInfo;
+        
+        if (this.authorized) {
+            console.log('[Supabase] ✓ 联盟认证通过:', characterInfo.name);
+        } else {
+            console.warn('[Supabase] ✗ 非目标联盟成员:', characterInfo.name);
+        }
+        
+        return this.authorized;
+    }
+
+    /**
+     * 检查是否已通过联盟认证
+     */
+    isAuthorized() {
+        return this.authorized;
+    }
+
+    /**
+     * 获取当前认证的角色信息
+     */
+    getCharacterInfo() {
+        return this.characterInfo;
+    }
+
+    /**
+     * 清除认证状态（退出登录）
+     */
+    clearAuth() {
+        this.authorized = false;
+        this.characterInfo = null;
+        console.log('[Supabase] 认证状态已清除');
+    }
+
+    /**
+     * 检查授权（内部方法）
+     */
+    _checkAuth() {
+        if (!this.initialized) {
+            console.warn('[Supabase] 未初始化');
+            return false;
+        }
+        if (!this.authorized) {
+            console.warn('[Supabase] 未通过联盟认证，无法访问云端数据');
+            return false;
+        }
+        return true;
+    }
+
+    /**
      * 获取所有有效虫洞
      */
     async getActiveWormholes() {
-        if (!this.initialized) {
-            console.warn('[Supabase] 未初始化');
-            return [];
-        }
+        if (!this._checkAuth()) return [];
         
         try {
             const { data, error } = await this.supabase
@@ -67,10 +134,7 @@ class SupabaseService {
      * 创建虫洞记录
      */
     async createWormhole(record) {
-        if (!this.initialized) {
-            console.warn('[Supabase] 未初始化');
-            return null;
-        }
+        if (!this._checkAuth()) return null;
         
         try {
             // 计算过期时间
@@ -154,7 +218,7 @@ class SupabaseService {
      * 删除虫洞
      */
     async deleteWormhole(id) {
-        if (!this.initialized) return false;
+        if (!this._checkAuth()) return false;
         
         try {
             const { error } = await this.supabase
@@ -179,10 +243,7 @@ class SupabaseService {
      * 订阅虫洞变化（实时同步）
      */
     subscribeToWormholes(callbacks) {
-        if (!this.initialized) {
-            console.warn('[Supabase] 未初始化，无法订阅');
-            return null;
-        }
+        if (!this._checkAuth()) return null;
         
         const { onInsert, onUpdate, onDelete } = callbacks;
         

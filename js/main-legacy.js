@@ -334,6 +334,9 @@ class RegionalMapApp {
         window.addEventListener('beforeunload', () => {
             this.stopEveScoutAutoRefresh();
         });
+        
+        // 绑定 EVE 登录按钮事件
+        this.bindEveAuthEvents();
     }
     
     bindResizerEvents() {
@@ -398,6 +401,178 @@ class RegionalMapApp {
         });
         
         document.addEventListener('touchend', onMouseUp);
+    }
+    
+    /**
+     * 绑定 EVE 认证事件
+     */
+    bindEveAuthEvents() {
+        const eveLoginBtn = document.getElementById('eveLoginBtn');
+        const logoutBtn = document.getElementById('btn-cloud-logout');
+        
+        if (eveLoginBtn) {
+            eveLoginBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                this.handleEveLogin();
+            });
+        }
+        
+        if (logoutBtn) {
+            logoutBtn.addEventListener('click', () => {
+                this.handleEveLogout();
+            });
+        }
+        
+        // 监听认证回调消息
+        window.addEventListener('message', (event) => {
+            if (event.origin !== window.location.origin) return;
+            
+            if (event.data.type === 'EVE_AUTH_CALLBACK') {
+                this.handleEveAuthCallback(event.data);
+            }
+        });
+    }
+    
+    /**
+     * 处理 EVE 登录
+     */
+    async handleEveLogin() {
+        if (typeof EveAuthService === 'undefined') {
+            this.showToast('EVE 认证服务未加载', 'error');
+            return;
+        }
+        
+        this.eveAuth = new EveAuthService();
+        
+        try {
+            // 更改回调 URL 为本地回调页面
+            this.eveAuth.redirectUri = window.location.origin + '/callback.html';
+            
+            const authUrl = await this.eveAuth.buildAuthUrl();
+            
+            // 存储 PKCE 参数
+            sessionStorage.setItem('eve_code_verifier', this.eveAuth.codeVerifier);
+            sessionStorage.setItem('eve_state', this.eveAuth.state);
+            
+            // 打开认证窗口
+            window.open(authUrl, 'eve-auth', 'width=800,height=600');
+            
+            this.showToast('请在弹出窗口中完成 EVE 登录');
+        } catch (error) {
+            console.error('[App] EVE 登录错误:', error);
+            this.showToast('EVE 登录失败: ' + error.message, 'error');
+        }
+    }
+    
+    /**
+     * 处理 EVE 认证回调
+     */
+    async handleEveAuthCallback(data) {
+        const { code, state, error } = data;
+        
+        if (error) {
+            this.showToast('EVE 认证失败: ' + error, 'error');
+            return;
+        }
+        
+        // 验证 state
+        const savedState = sessionStorage.getItem('eve_state');
+        if (state !== savedState) {
+            this.showToast('State 验证失败，可能存在 CSRF 攻击', 'error');
+            return;
+        }
+        
+        // 恢复 PKCE 参数
+        this.eveAuth.codeVerifier = sessionStorage.getItem('eve_code_verifier');
+        this.eveAuth.state = state;
+        
+        try {
+            this.showToast('正在完成认证...');
+            
+            // 换取 token
+            await this.eveAuth.exchangeCodeForToken(code);
+            
+            // 获取角色信息
+            const characterInfo = await this.eveAuth.getCharacterInfo();
+            
+            // 设置联盟认证
+            const isAuthorized = supabaseService.setAllianceAuth(characterInfo);
+            
+            if (isAuthorized) {
+                this.showToast(`欢迎, ${characterInfo.name}!联盟认证通过`);
+                this.updateCloudAuthUI(characterInfo);
+                
+                // 加载云端数据
+                this.loadCloudWormholes();
+                this.subscribeToCloudWormholes();
+            } else {
+                this.showToast('该角色不属于目标联盟，无法访问云端', 'error');
+                this.updateCloudAuthUI(characterInfo, false);
+            }
+            
+            // 清理 sessionStorage
+            sessionStorage.removeItem('eve_code_verifier');
+            sessionStorage.removeItem('eve_state');
+            
+        } catch (error) {
+            console.error('[App] EVE 认证处理错误:', error);
+            this.showToast('认证失败: ' + error.message, 'error');
+        }
+    }
+    
+    /**
+     * 更新云端认证 UI
+     */
+    updateCloudAuthUI(characterInfo, authorized = true) {
+        const promptDiv = document.getElementById('cloud-auth-prompt');
+        const statusDiv = document.getElementById('cloud-auth-status');
+        
+        if (promptDiv) promptDiv.style.display = 'none';
+        if (statusDiv) {
+            statusDiv.style.display = 'block';
+            
+            // 设置头像
+            const avatar = document.getElementById('auth-character-avatar');
+            if (avatar) {
+                avatar.src = `https://images.evetech.net/characters/${characterInfo.character_id}/portrait?size=64`;
+            }
+            
+            // 设置角色名
+            const nameDiv = document.getElementById('auth-character-name');
+            if (nameDiv) {
+                nameDiv.textContent = characterInfo.name;
+            }
+            
+            // 设置联盟状态
+            const statusDiv2 = document.getElementById('auth-alliance-status');
+            if (statusDiv2) {
+                if (authorized) {
+                    statusDiv2.textContent = '✓ 联盟认证通过';
+                    statusDiv2.style.color = '#4caf50';
+                } else {
+                    const allianceName = characterInfo.alliance?.name || '未知';
+                    statusDiv2.textContent = `✗ 非目标联盟 (${allianceName})`;
+                    statusDiv2.style.color = '#f44336';
+                }
+            }
+        }
+    }
+    
+    /**
+     * 处理 EVE 退出登录
+     */
+    handleEveLogout() {
+        supabaseService.clearAuth();
+        this.eveAuth = null;
+        
+        // 重置 UI
+        const promptDiv = document.getElementById('cloud-auth-prompt');
+        const statusDiv = document.getElementById('cloud-auth-status');
+        
+        if (promptDiv) promptDiv.style.display = 'block';
+        if (statusDiv) statusDiv.style.display = 'none';
+        
+        this.showToast('已退出登录');
     }
     
     bindSearchEvents() {
@@ -1566,10 +1741,28 @@ class RegionalMapApp {
         
         if (success) {
             console.log('[App] Supabase 初始化成功');
-            this.loadCloudWormholes();
-            this.subscribeToCloudWormholes();
+            
+            // 检查是否已通过 EVE 联盟认证
+            if (supabaseService.isAuthorized()) {
+                console.log('[App] 已通过联盟认证，加载云端数据');
+                this.loadCloudWormholes();
+                this.subscribeToCloudWormholes();
+            } else {
+                console.log('[App] 未通过联盟认证，显示登录提示');
+                this.showCloudAuthPrompt();
+            }
         } else {
             console.warn('[App] Supabase 初始化失败');
+        }
+    }
+    
+    /**
+     * 显示云端认证提示
+     */
+    showCloudAuthPrompt() {
+        const container = document.getElementById('cloud-auth-prompt');
+        if (container) {
+            container.style.display = 'block';
         }
     }
     
