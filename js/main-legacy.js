@@ -444,12 +444,18 @@ class RegionalMapApp {
                         error: null
                     });
                 } else {
-                    this.handleEveAuthCallback({
-                        type: 'EVE_AUTH_CALLBACK',
-                        code: null,
-                        state: null,
-                        error: data.error
-                    });
+                    // 显示错误提示
+                    if (data.error && data.error.includes('端口 8080')) {
+                        this.showToast(data.error, 'error', 5000);
+                        alert(data.error);
+                    } else {
+                        this.handleEveAuthCallback({
+                            type: 'EVE_AUTH_CALLBACK',
+                            code: null,
+                            state: null,
+                            error: data.error
+                        });
+                    }
                 }
             });
         }
