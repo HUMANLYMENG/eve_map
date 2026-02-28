@@ -471,8 +471,8 @@ class RegionalMapApp {
             const isElectron = window.electronAPI && window.electronAPI.isElectron;
             
             if (isElectron) {
-                // Electron 环境：使用本地服务器接收回调
-                this.eveAuth.redirectUri = 'http://localhost:8080/callback';
+                // Electron 环境：使用本地服务器接收回调（端口5525）
+                this.eveAuth.redirectUri = 'http://localhost:5525/callback';
                 console.log('[EVE Auth] Electron 模式，回调 URL:', this.eveAuth.redirectUri);
             } else {
                 // 浏览器环境：使用当前页面 origin
