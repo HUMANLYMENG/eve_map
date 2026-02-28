@@ -9,11 +9,14 @@ const app = electron.app;
 const BrowserWindow = electron.BrowserWindow;
 const ipcMain = electron.ipcMain;
 const dialog = electron.dialog;
+const shell = electron.shell;
 
 import path from 'path';
 import fs from 'fs/promises';
 import os from 'os';
 import { fileURLToPath } from 'url';
+import http from 'http';
+import { URL } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -239,3 +242,106 @@ async function readEveLogFile(filePath) {
     }
   }
 }
+
+
+// ==================== EVE SSO 认证支持 ====================
+
+let eveAuthServer = null;
+let eveAuthResolve = null;
+
+/**
+ * 启动临时 HTTP 服务器接收 EVE SSO 回调
+ */
+function startEveAuthServer() {
+  return new Promise((resolve, reject) => {
+    // 如果服务器已存在，先关闭
+    if (eveAuthServer) {
+      eveAuthServer.close();
+      eveAuthServer = null;
+    }
+    
+    eveAuthResolve = resolve;
+    
+    // 创建 HTTP 服务器
+    eveAuthServer = http.createServer((req, res) => {
+      const url = new URL(req.url, `http://localhost:5525`);
+      const code = url.searchParams.get('code');
+      const state = url.searchParams.get('state');
+      const error = url.searchParams.get('error');
+      
+      // 设置 CORS 头
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      
+      if (error) {
+        res.writeHead(400);
+        res.end(`<html><body><h1>认证失败</h1><p>${error}</p></body></html>`);
+        
+        if (eveAuthResolve) {
+          eveAuthResolve({ success: false, error });
+          eveAuthResolve = null;
+        }
+      } else if (code) {
+        res.writeHead(200);
+        res.end('<html><body><h1>认证成功！</h1><p>请返回应用程序。</p></body></html>');
+        
+        if (eveAuthResolve) {
+          eveAuthResolve({ success: true, code, state });
+          eveAuthResolve = null;
+        }
+      } else {
+        res.writeHead(400);
+        res.end('<html><body><h1>无效请求</h1></body></html>');
+      }
+      
+      // 关闭服务器
+      setTimeout(() => {
+        if (eveAuthServer) {
+          eveAuthServer.close();
+          eveAuthServer = null;
+        }
+      }, 1000);
+    });
+    
+    // 监听端口 5525
+    eveAuthServer.listen(5525, 'localhost', () => {
+      console.log('[EVE Auth] 回调服务器已启动: http://localhost:5525');
+    });
+    
+    // 设置超时
+    setTimeout(() => {
+      if (eveAuthServer) {
+        eveAuthServer.close();
+        eveAuthServer = null;
+        if (eveAuthResolve) {
+          eveAuthResolve({ success: false, error: 'Timeout' });
+          eveAuthResolve = null;
+        }
+      }
+    }, 5 * 60 * 1000); // 5分钟超时
+  });
+}
+
+// IPC 处理 - 开始 EVE 认证
+ipcMain.handle('start-eve-auth', async (event, authUrl) => {
+  try {
+    // 启动回调服务器
+    const authPromise = startEveAuthServer();
+    
+    // 打开系统浏览器
+    shell.openExternal(authUrl);
+    
+    // 等待回调
+    const result = await authPromise;
+    
+    // 发送结果给渲染进程
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('eve-auth-callback', result);
+    }
+    
+    return result;
+  } catch (error) {
+    console.error('[EVE Auth] 认证失败:', error);
+    return { success: false, error: error.message };
+  }
+});

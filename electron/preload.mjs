@@ -39,6 +39,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.removeAllListeners(channel);
   },
   
+  // EVE SSO 认证
+  startEveAuth: (authUrl) => ipcRenderer.invoke('start-eve-auth', authUrl),
+  onEveAuthCallback: (callback) => {
+    ipcRenderer.on('eve-auth-callback', (event, data) => callback(data));
+  },
+  
   // 检查是否在 Electron 环境中运行
   isElectron: true
 });

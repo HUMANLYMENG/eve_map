@@ -423,7 +423,7 @@ class RegionalMapApp {
             });
         }
         
-        // 监听认证回调消息
+        // 监听认证回调消息（浏览器环境）
         window.addEventListener('message', (event) => {
             if (event.origin !== window.location.origin) return;
             
@@ -431,6 +431,28 @@ class RegionalMapApp {
                 this.handleEveAuthCallback(event.data);
             }
         });
+        
+        // 监听 Electron 认证回调（Electron 环境）
+        if (window.electronAPI && window.electronAPI.onEveAuthCallback) {
+            window.electronAPI.onEveAuthCallback((data) => {
+                console.log('[EVE Auth] Electron 回调数据:', data);
+                if (data.success) {
+                    this.handleEveAuthCallback({
+                        type: 'EVE_AUTH_CALLBACK',
+                        code: data.code,
+                        state: data.state,
+                        error: null
+                    });
+                } else {
+                    this.handleEveAuthCallback({
+                        type: 'EVE_AUTH_CALLBACK',
+                        code: null,
+                        state: null,
+                        error: data.error
+                    });
+                }
+            });
+        }
     }
     
     /**
@@ -445,11 +467,19 @@ class RegionalMapApp {
         this.eveAuth = new EveAuthService();
         
         try {
-            // 使用当前页面 origin作为回调URL
-            const currentOrigin = window.location.origin;
-            this.eveAuth.redirectUri = currentOrigin + '/callback.html';
+            // 检测是否在 Electron 环境
+            const isElectron = window.electronAPI && window.electronAPI.isElectron;
             
-            console.log('[EVE Auth] 回调 URL:', this.eveAuth.redirectUri);
+            if (isElectron) {
+                // Electron 环境：使用本地服务器接收回调
+                this.eveAuth.redirectUri = 'http://localhost:5525/callback';
+                console.log('[EVE Auth] Electron 模式，回调 URL:', this.eveAuth.redirectUri);
+            } else {
+                // 浏览器环境：使用当前页面 origin
+                const currentOrigin = window.location.origin;
+                this.eveAuth.redirectUri = currentOrigin + '/callback.html';
+                console.log('[EVE Auth] 浏览器模式，回调 URL:', this.eveAuth.redirectUri);
+            }
             
             const authUrl = await this.eveAuth.buildAuthUrl();
             
@@ -459,10 +489,15 @@ class RegionalMapApp {
             sessionStorage.setItem('eve_code_verifier', this.eveAuth.codeVerifier);
             sessionStorage.setItem('eve_state', this.eveAuth.state);
             
-            // 打开认证窗口
-            window.open(authUrl, 'eve-auth', 'width=800,height=600');
-            
-            this.showToast('请在弹出窗口中完成 EVE 登录');
+            if (isElectron) {
+                // Electron: 使用 IPC 触发认证
+                this.showToast('正在打开浏览器进行 EVE 登录...');
+                window.electronAPI.startEveAuth(authUrl);
+            } else {
+                // 浏览器: 打开弹窗
+                window.open(authUrl, 'eve-auth', 'width=800,height=600');
+                this.showToast('请在弹出窗口中完成 EVE 登录');
+            }
         } catch (error) {
             console.error('[App] EVE 登录错误:', error);
             this.showToast('EVE 登录失败: ' + error.message, 'error');
